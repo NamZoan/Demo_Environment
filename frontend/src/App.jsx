@@ -1,4 +1,4 @@
-import { Activity, AlertTriangle, MapPinned, ServerCog } from "lucide-react";
+import { Activity, AlertTriangle, Camera, CheckCircle2, FileCheck2, MapPinned, ServerCog, Siren } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import AdminLayout from "./components/layout/AdminLayout.jsx";
@@ -18,19 +18,27 @@ function Dashboard({ stations, onOpenStations }) {
       ),
     [stations],
   );
+  const qcvnWarnings = stations.filter((station) => station.qcvnStatus === "warning").length;
+  const qcvnCritical = stations.filter((station) => station.qcvnStatus === "critical").length;
+  const typeCounts = stations.reduce((summary, station) => {
+    summary[station.type] = (summary[station.type] || 0) + 1;
+    return summary;
+  }, {});
 
   const cards = [
-    { label: "Tong tram", value: counts.total, icon: MapPinned, tone: "bg-cyan-50 text-cyan-800" },
-    { label: "Dang online", value: counts.online, icon: Activity, tone: "bg-emerald-50 text-emerald-800" },
-    { label: "Mat tin hieu", value: counts.offline, icon: AlertTriangle, tone: "bg-red-50 text-red-800" },
-    { label: "Bao tri", value: counts.maintenance, icon: ServerCog, tone: "bg-amber-50 text-amber-800" },
+    { label: "Tổng trạm", value: counts.total, icon: MapPinned, tone: "bg-cyan-50 text-cyan-800" },
+    { label: "Đang online", value: counts.online, icon: Activity, tone: "bg-emerald-50 text-emerald-800" },
+    { label: "Mất tín hiệu", value: counts.offline, icon: AlertTriangle, tone: "bg-red-50 text-red-800" },
+    { label: "Bảo trì", value: counts.maintenance, icon: ServerCog, tone: "bg-amber-50 text-amber-800" },
   ];
 
   return (
     <section className="space-y-4">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-950">Dashboard</h1>
-        <p className="mt-1 text-sm text-slate-500">Tong quan van hanh he thong quan trac moi truong.</p>
+        <h1 className="text-2xl font-semibold text-slate-950">Điều hành dữ liệu quan trắc tự động</h1>
+        <p className="mt-1 text-sm text-slate-500">
+          Màn hình nghiệp vụ theo luồng Envisoft: tiếp nhận dữ liệu, giám sát WebGIS, cảnh báo QCVN và kiểm duyệt.
+        </p>
       </div>
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => {
@@ -46,18 +54,66 @@ function Dashboard({ stations, onOpenStations }) {
           );
         })}
       </div>
-      <button className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white" onClick={onOpenStations} type="button">
-        Mo trang quan ly tram
-      </button>
+      <div className="grid gap-4 xl:grid-cols-[1.2fr_.8fr]">
+        <section className="rounded-lg border border-slate-200 bg-white p-4">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold">Giám sát nghiệp vụ</h2>
+            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">Realtime</span>
+          </div>
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-800">
+              <Siren className="mb-3 h-5 w-5" />
+              <p className="text-sm font-medium">Vượt QCVN nghiêm trọng</p>
+              <strong className="mt-2 block text-2xl">{qcvnCritical}</strong>
+            </div>
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-800">
+              <AlertTriangle className="mb-3 h-5 w-5" />
+              <p className="text-sm font-medium">Cảnh báo cần kiểm tra</p>
+              <strong className="mt-2 block text-2xl">{qcvnWarnings}</strong>
+            </div>
+            <div className="rounded-md border border-cyan-200 bg-cyan-50 p-3 text-cyan-800">
+              <FileCheck2 className="mb-3 h-5 w-5" />
+              <p className="text-sm font-medium">Lô dữ liệu chờ duyệt</p>
+              <strong className="mt-2 block text-2xl">128</strong>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4">
+          <h2 className="text-lg font-semibold">Loại hình quan trắc</h2>
+          <div className="mt-4 space-y-3">
+            {Object.entries(typeCounts).map(([type, value]) => (
+              <div className="flex items-center justify-between text-sm" key={type}>
+                <span className="text-slate-600">{type}</span>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white" onClick={onOpenStations} type="button">
+          Mở WebGIS & quản lý trạm
+        </button>
+        <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700" type="button">
+          <Camera className="h-4 w-4" />
+          Theo dõi camera
+        </button>
+        <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700" type="button">
+          <CheckCircle2 className="h-4 w-4" />
+          Kiểm duyệt dữ liệu
+        </button>
+      </div>
     </section>
   );
 }
 
-function PlaceholderPage({ title }) {
+function PlaceholderPage({ title, description }) {
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-8">
       <h1 className="text-2xl font-semibold text-slate-950">{title}</h1>
-      <p className="mt-2 text-sm text-slate-500">Module nay da co vi tri trong layout CMS va san sang noi API that.</p>
+      <p className="mt-2 text-sm text-slate-500">{description}</p>
     </section>
   );
 }
@@ -123,9 +179,18 @@ export default function App() {
         />
       );
     }
-    if (activePage === "settings") return <PlaceholderPage title="Cai dat he thong" />;
-    if (activePage === "rbac") return <PlaceholderPage title="Phan quyen" />;
-    return <PlaceholderPage title="Du lieu thong so" />;
+    if (activePage === "qcvn") {
+      return <PlaceholderPage description="Cấu hình ngưỡng, quy chuẩn, cấp cảnh báo và luồng xác nhận sự cố vượt QCVN." title="Cảnh báo QCVN" />;
+    }
+    if (activePage === "approval") {
+      return <PlaceholderPage description="Hàng đợi kiểm duyệt dữ liệu tự động, loại bỏ bất thường và duyệt dữ liệu vào kho chính thức." title="Kiểm duyệt dữ liệu" />;
+    }
+    if (activePage === "camera") {
+      return <PlaceholderPage description="Theo dõi camera trạm, lịch lấy mẫu tự động và trạng thái lệnh điều khiển thiết bị." title="Camera & Lấy mẫu" />;
+    }
+    if (activePage === "settings") return <PlaceholderPage description="Quản lý datalogger, FTP/MQTT, QCVN, thông số và kết nối liên thông." title="Cấu hình hệ thống" />;
+    if (activePage === "rbac") return <PlaceholderPage description="Quản lý người dùng, vai trò, đơn vị và phạm vi dữ liệu theo khu vực." title="Phân quyền" />;
+    return <PlaceholderPage description="Tra cứu, biểu đồ và xuất dữ liệu quan trắc theo trạm, thông số và thời gian." title="Dữ liệu thông số" />;
   }
 
   return (

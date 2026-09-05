@@ -14,14 +14,14 @@ import {
 import { createMockSeries } from "../../services/mockApi.js";
 
 const rangeOptions = [
-  { value: "day", label: "Ngay" },
-  { value: "week", label: "Tuan" },
-  { value: "month", label: "Thang" },
+  { value: "day", label: "Ngày" },
+  { value: "week", label: "Tuần" },
+  { value: "month", label: "Tháng" },
 ];
 
 const metricConfig = [
-  { key: "temperature", label: "Nhiet do", unit: "C", icon: Thermometer, warning: 38, critical: 42 },
-  { key: "humidity", label: "Do am", unit: "%", icon: Droplets, warning: 85, critical: 95 },
+  { key: "temperature", label: "Nhiệt độ", unit: "C", icon: Thermometer, warning: 38, critical: 42 },
+  { key: "humidity", label: "Độ ẩm", unit: "%", icon: Droplets, warning: 85, critical: 95 },
   { key: "pm25", label: "PM2.5", unit: "ug/m3", icon: Gauge, warning: 35, critical: 150 },
   { key: "co", label: "CO", unit: "ppm", icon: Flame, warning: 5, critical: 10 },
 ];
@@ -54,7 +54,7 @@ export default function StationParameters({ onBack, station }) {
       <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
         <div>
           <button className="mb-2 text-sm font-medium text-cyan-700" onClick={onBack} type="button">
-            Quay lai danh sach
+            Quay lại danh sách
           </button>
           <h1 className="text-2xl font-semibold text-slate-950">{station.name}</h1>
           <p className="mt-1 text-sm text-slate-500">
@@ -64,7 +64,7 @@ export default function StationParameters({ onBack, station }) {
         <label className="grid gap-1 text-sm text-slate-600">
           <span className="flex items-center gap-2">
             <CalendarDays className="h-4 w-4" />
-            Khoang thoi gian
+            Khoảng thời gian
           </span>
           <select
             className="h-10 rounded-md border border-slate-300 bg-white px-3 outline-none focus:border-cyan-600"
@@ -104,8 +104,10 @@ export default function StationParameters({ onBack, station }) {
       <section className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold">Bieu do bien thien thong so</h2>
-            <p className="text-sm text-slate-500">Du lieu mock theo {rangeOptions.find((item) => item.value === range)?.label.toLowerCase()}.</p>
+            <h2 className="text-lg font-semibold">Biểu đồ biến thiên thông số</h2>
+            <p className="text-sm text-slate-500">
+              Dữ liệu mock theo {rangeOptions.find((item) => item.value === range)?.label.toLowerCase()}, sẵn sàng nối API Envisoft-like.
+            </p>
           </div>
         </div>
         <div className="h-[420px]">

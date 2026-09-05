@@ -1,5 +1,6 @@
 const regions = ["Ha Noi", "Da Nang", "Ho Chi Minh", "Can Tho", "Hai Phong"];
 const statuses = ["online", "offline", "maintenance"];
+const stationTypes = ["Không khí xung quanh", "Nước mặt", "Nước thải", "Khí thải"];
 
 function stationStatus(index) {
   if (index % 17 === 0) return "offline";
@@ -19,6 +20,9 @@ export function createMockStations(total = 2000) {
       code: `ENV-${String(id).padStart(4, "0")}`,
       name: `Tram quan trac ${region} ${String(id).padStart(4, "0")}`,
       region,
+      type: stationTypes[index % stationTypes.length],
+      qcvnStatus: index % 19 === 0 ? "critical" : index % 7 === 0 ? "warning" : "normal",
+      datalogger: `DL-${String((index % 800) + 1).padStart(3, "0")}`,
       latitude: Number(latitude.toFixed(5)),
       longitude: Number(longitude.toFixed(5)),
       status: stationStatus(index),

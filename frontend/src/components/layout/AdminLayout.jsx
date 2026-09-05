@@ -1,4 +1,4 @@
-import { Bell, Menu, Search, UserCircle } from "lucide-react";
+import { Bell, Building2, Menu, Search, UserCircle } from "lucide-react";
 
 import Sidebar from "./Sidebar.jsx";
 
@@ -9,6 +9,15 @@ export default function AdminLayout({ activePage, alertCount, children, globalSe
         <Sidebar activePage={activePage} onNavigate={onNavigate} />
 
         <div className="min-w-0 flex-1">
+          <div className="border-b border-emerald-700 bg-[#0b5563] px-4 py-2 text-white lg:px-6">
+            <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <Building2 className="h-4 w-4 text-emerald-300" />
+                Cục Môi trường - Trung tâm điều hành mạng lưới quan trắc
+              </div>
+              <p className="text-xs text-cyan-50/80">Tiếp nhận - giám sát - cảnh báo - chia sẻ dữ liệu</p>
+            </div>
+          </div>
           <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white px-4 shadow-sm lg:px-6">
             <div className="flex items-center gap-3">
               <button className="rounded-md border border-slate-200 p-2 text-slate-600 lg:hidden" type="button">
@@ -19,7 +28,7 @@ export default function AdminLayout({ activePage, alertCount, children, globalSe
                 <input
                   className="h-10 w-full rounded-md border border-slate-300 bg-slate-50 pl-9 pr-3 text-sm outline-none focus:border-cyan-600 focus:bg-white"
                   onChange={(event) => onGlobalSearch(event.target.value)}
-                  placeholder="Tim kiem tram, khu vuc, ma thiet bi"
+                  placeholder="Tìm kiếm trạm, khu vực, mã datalogger"
                   value={globalSearch}
                 />
               </div>
@@ -37,7 +46,7 @@ export default function AdminLayout({ activePage, alertCount, children, globalSe
               <div className="hidden items-center gap-2 rounded-md border border-slate-200 px-3 py-2 md:flex">
                 <UserCircle className="h-5 w-5 text-slate-500" />
                 <div className="text-sm">
-                  <p className="font-medium leading-none">Admin</p>
+                  <p className="font-medium leading-none">Quản trị viên</p>
                   <p className="mt-1 text-xs text-slate-500">Super Admin</p>
                 </div>
               </div>
