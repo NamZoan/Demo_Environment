@@ -8,6 +8,7 @@ Dockerized reference stack for 2,000 environmental monitoring stations sending 1
 - FastAPI backend on `http://localhost:8000`
 - FTP server on `localhost:21`
 - FTP worker polling uploaded CSV/JSON files
+- IoT simulator publishing 100 outdoor sensor CSV files every 60 seconds
 - React dashboard on `http://localhost:3000`
 
 ## Run
@@ -63,11 +64,18 @@ user: station
 password: stationpass
 ```
 
-CSV:
+Legacy CSV:
 
 ```csv
 station_code,time,temperature,humidity,pm25
 HN001,2026-09-05T00:01:00Z,30.5,70.2,18.4
+```
+
+IoT simulator CSV:
+
+```csv
+sensor_id,timestamp,temperature,humidity,wind_speed,pm25
+sensor_001,2026-09-05T08:00:00+00:00,31.2,68.5,12.4,42.8
 ```
 
 JSON:
@@ -79,6 +87,7 @@ JSON:
     "time": "2026-09-05T00:01:00Z",
     "temperature": 30.5,
     "humidity": 70.2,
+    "wind_speed": 12.4,
     "pm25": 18.4
   }
 ]
@@ -87,11 +96,12 @@ JSON:
 Inside the worker container, files move through:
 
 ```text
-/ftp/incoming -> /ftp/archive
-/ftp/incoming -> /ftp/error
+/ftp/data -> /ftp/archive
+/ftp/data -> /ftp/error
 ```
 
-For this compose setup, upload files into the FTP account root and map the production FTP server so station uploads land in `/ftp/incoming`.
+The simulator uploads each file into `/data/sensor_001/` through `/data/sensor_100/`.
+The worker scans those folders recursively, creates missing `sensor_###` stations, writes `sensor_data`, and updates `latest_station_readings`.
 
 ## API
 

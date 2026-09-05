@@ -30,6 +30,7 @@ export function createMockStations(total = 2000) {
       metrics: {
         temperature: Number((24 + (index % 16) + Math.sin(index) * 2).toFixed(1)),
         humidity: Number((52 + (index % 42)).toFixed(1)),
+        windSpeed: Number((4 + (index % 32) + Math.abs(Math.sin(index / 4)) * 8).toFixed(1)),
         pm25: Number((12 + (index % 95)).toFixed(1)),
         co: Number((0.2 + (index % 35) / 10).toFixed(1)),
       },
@@ -49,6 +50,7 @@ export function createMockSeries(stationId, range = "day") {
       time: time.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit" }),
       temperature: Number((28 + wave * 4 + (seed % 5)).toFixed(1)),
       humidity: Number((66 - wave * 12 + (seed % 7)).toFixed(1)),
+      windSpeed: Number((7 + Math.abs(Math.sin(index / 2)) * 18 + (seed % 6)).toFixed(1)),
       pm25: Number((24 + Math.cos(index / 2) * 16 + (seed % 12)).toFixed(1)),
       co: Number((0.8 + Math.max(wave, 0) * 1.6 + (seed % 4) / 10).toFixed(1)),
     };
@@ -63,7 +65,7 @@ export function addStation(stations, payload) {
       code: `ENV-${String(nextId).padStart(4, "0")}`,
       status: "maintenance",
       lastSeenAt: new Date().toISOString(),
-      metrics: { temperature: 0, humidity: 0, pm25: 0, co: 0 },
+      metrics: { temperature: 0, humidity: 0, windSpeed: 0, pm25: 0, co: 0 },
       ...payload,
     },
     ...stations,

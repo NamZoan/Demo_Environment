@@ -57,12 +57,13 @@ USING stations
 WHERE sensor_data.station_id = stations.id
   AND stations.code LIKE 'ENV-%';
 
-INSERT INTO sensor_data (station_id, time, temperature, humidity, pm25)
+INSERT INTO sensor_data (station_id, time, temperature, humidity, wind_speed, pm25)
 SELECT
     stations.id,
     TIMESTAMPTZ '2026-09-05 09:00:00+00' - make_interval(hours => points.step),
     round((24 + mod(stations.id, 16) + sin(points.step / 3.0) * 2)::numeric, 2)::double precision,
     round((52 + mod(stations.id + points.step, 42))::numeric, 2)::double precision,
+    round((4 + mod(stations.id + points.step, 32) + abs(sin(points.step / 4.0)) * 8)::numeric, 2)::double precision,
     round((12 + mod(stations.id + points.step, 95))::numeric, 2)::double precision
 FROM stations
 CROSS JOIN generate_series(0, 23) AS points(step)
@@ -70,15 +71,17 @@ WHERE stations.code LIKE 'ENV-%'
 ON CONFLICT (station_id, time) DO UPDATE SET
     temperature = EXCLUDED.temperature,
     humidity = EXCLUDED.humidity,
+    wind_speed = EXCLUDED.wind_speed,
     pm25 = EXCLUDED.pm25,
     received_at = now();
 
-INSERT INTO latest_station_readings (station_id, time, temperature, humidity, pm25, status)
+INSERT INTO latest_station_readings (station_id, time, temperature, humidity, wind_speed, pm25, status)
 SELECT DISTINCT ON (sensor_data.station_id)
     sensor_data.station_id,
     sensor_data.time,
     sensor_data.temperature,
     sensor_data.humidity,
+    sensor_data.wind_speed,
     sensor_data.pm25,
     'online'
 FROM sensor_data
@@ -89,6 +92,7 @@ ON CONFLICT (station_id) DO UPDATE SET
     time = EXCLUDED.time,
     temperature = EXCLUDED.temperature,
     humidity = EXCLUDED.humidity,
+    wind_speed = EXCLUDED.wind_speed,
     pm25 = EXCLUDED.pm25,
     status = EXCLUDED.status,
     updated_at = now();

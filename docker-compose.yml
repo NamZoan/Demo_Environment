@@ -33,7 +33,7 @@ services:
     environment:
       FTP_USER: station
       FTP_PASS: stationpass
-      PASV_ADDRESS: 127.0.0.1
+      PASV_ADDRESS: ftp-server
       PASV_MIN_PORT: 21100
       PASV_MAX_PORT: 21110
       LOCAL_UMASK: "022"
@@ -48,7 +48,7 @@ services:
       context: ./worker
     environment:
       DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
-      FTP_INCOMING_DIR: /ftp/incoming
+      FTP_INCOMING_DIR: /ftp/data
       FTP_ARCHIVE_DIR: /ftp/archive
       FTP_ERROR_DIR: /ftp/error
       POLL_SECONDS: 5
@@ -57,6 +57,25 @@ services:
     depends_on:
       db:
         condition: service_healthy
+
+  iot-simulator:
+    build:
+      context: ./iot-simulator
+    environment:
+      FTP_HOST: ftp-server
+      FTP_PORT: 21
+      FTP_USER: station
+      FTP_PASSWORD: stationpass
+      REMOTE_BASE_DIR: /data
+      SENSOR_COUNT: 100
+      INTERVAL_SECONDS: 60
+      LOCAL_OUTBOX_DIR: /tmp/iot-outbox
+      UPLOAD_RETRIES: 3
+      RETRY_BACKOFF_SECONDS: 3
+      FTP_PASSIVE_MODE: "true"
+      LOG_LEVEL: INFO
+    depends_on:
+      - ftp-server
 
   frontend:
     build:

@@ -43,6 +43,7 @@ class LiveStation(Station):
     time: datetime | None = None
     temperature: float | None = None
     humidity: float | None = None
+    wind_speed: float | None = None
     pm25: float | None = None
     live_status: str
 
@@ -51,6 +52,7 @@ class SensorPoint(BaseModel):
     time: datetime
     temperature: float | None
     humidity: float | None
+    wind_speed: float | None = None
     pm25: float | None
     samples: int | None = None
 

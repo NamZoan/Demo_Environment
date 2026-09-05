@@ -101,6 +101,7 @@ function normalizeStation(row) {
     metrics: {
       temperature: row.temperature ?? 0,
       humidity: row.humidity ?? 0,
+      windSpeed: row.wind_speed ?? metadata.wind_speed ?? 0,
       pm25: row.pm25 ?? 0,
       co: metadata.co ?? Number((0.4 + (row.id % 30) / 10).toFixed(1)),
     },
@@ -116,10 +117,19 @@ export async function fetchCmsStations(currentUser) {
       throw new Error("Cannot load backend station data");
     }
     const rows = await response.json();
-    return { source: "backend", stations: rows.map(normalizeStation) };
+    return { source: "backend", stations: rows.map(normalizeStation).sort(sortSimulatorStationsFirst) };
   } catch {
     return { source: "mock", stations: [] };
   }
+}
+
+function sortSimulatorStationsFirst(left, right) {
+  const leftIsSensor = left.code.startsWith("sensor_");
+  const rightIsSensor = right.code.startsWith("sensor_");
+  if (leftIsSensor !== rightIsSensor) {
+    return leftIsSensor ? -1 : 1;
+  }
+  return left.code.localeCompare(right.code);
 }
 
 export async function fetchBackendHealth() {

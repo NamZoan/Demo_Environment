@@ -11,6 +11,7 @@ from app.repository import (
     authenticate_user,
     create_station,
     delete_station,
+    ensure_runtime_schema,
     fetch_live_stations,
     fetch_overview,
     fetch_station_data,
@@ -44,6 +45,8 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup() -> None:
     await database.connect()
+    async with database.acquire() as connection:
+        await ensure_runtime_schema(connection)
 
 
 @app.on_event("shutdown")

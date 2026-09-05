@@ -31,6 +31,7 @@ export const demoLiveStations = demoStations.map((station, index) => ({
   time: new Date(now - index * 4 * 60 * 1000).toISOString(),
   temperature: index === 0 ? 31.5 : 28.2,
   humidity: index === 0 ? 74 : 88,
+  wind_speed: index === 0 ? 14.2 : 8.6,
   pm25: index === 0 ? 42 : 18,
   live_status: index === 0 ? "warning" : "online",
 }));
@@ -43,6 +44,7 @@ export function demoSensorData(stationId) {
       time: new Date(now - (23 - index) * hour).toISOString(),
       temperature: Number((29 + stationOffset + wave * 2).toFixed(2)),
       humidity: Number((68 - wave * 7).toFixed(2)),
+      wind_speed: Number((8 + Math.abs(wave) * 12).toFixed(2)),
       pm25: Number((21 + stationOffset * 1.5 + Math.cos(index / 2) * 5).toFixed(2)),
       samples: 60,
     };

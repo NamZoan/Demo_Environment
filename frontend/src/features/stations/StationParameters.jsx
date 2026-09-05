@@ -1,5 +1,5 @@
-import { CalendarDays, Droplets, Flame, Gauge, Thermometer } from "lucide-react";
-import { useMemo, useState } from "react";
+import { CalendarDays, Droplets, Flame, Gauge, Thermometer, Wind } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
   Legend,
@@ -12,6 +12,7 @@ import {
 } from "recharts";
 
 import { createMockSeries } from "../../services/mockApi.js";
+import { fetchStationData } from "../../api.js";
 
 const rangeOptions = [
   { value: "day", label: "Ngày" },
@@ -22,6 +23,7 @@ const rangeOptions = [
 const metricConfig = [
   { key: "temperature", label: "Nhiệt độ", unit: "C", icon: Thermometer, warning: 38, critical: 42 },
   { key: "humidity", label: "Độ ẩm", unit: "%", icon: Droplets, warning: 85, critical: 95 },
+  { key: "windSpeed", label: "Tốc độ gió", unit: "km/h", icon: Wind, warning: 35, critical: 50 },
   { key: "pm25", label: "PM2.5", unit: "ug/m3", icon: Gauge, warning: 35, critical: 150 },
   { key: "co", label: "CO", unit: "ppm", icon: Flame, warning: 5, critical: 10 },
 ];
@@ -29,9 +31,35 @@ const metricConfig = [
 const lineColors = {
   temperature: "#dc2626",
   humidity: "#2563eb",
+  windSpeed: "#059669",
   pm25: "#ca8a04",
   co: "#7c3aed",
 };
+
+const rangeConfig = {
+  day: { hours: 24, resolution: "1m" },
+  week: { hours: 24 * 7, resolution: "1h" },
+  month: { hours: 24 * 30, resolution: "1d" },
+};
+
+function chartTimeLabel(value, range) {
+  const date = new Date(value);
+  if (range === "day") {
+    return date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+  }
+  return date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" });
+}
+
+function normalizeSeries(points, range) {
+  return points.map((point) => ({
+    time: chartTimeLabel(point.time, range),
+    temperature: point.temperature,
+    humidity: point.humidity,
+    windSpeed: point.wind_speed,
+    pm25: point.pm25,
+    co: point.co ?? null,
+  }));
+}
 
 function levelFor(value, metric) {
   if (value >= metric.critical) return "critical";
@@ -47,7 +75,34 @@ function cardStyle(level) {
 
 export default function StationParameters({ onBack, station }) {
   const [range, setRange] = useState("day");
-  const series = useMemo(() => createMockSeries(station.id, range), [range, station.id]);
+  const [backendSeries, setBackendSeries] = useState([]);
+  const [dataSource, setDataSource] = useState("mock");
+  const mockSeries = useMemo(() => createMockSeries(station.id, range), [range, station.id]);
+  const series = backendSeries.length > 0 ? backendSeries : mockSeries;
+
+  useEffect(() => {
+    let cancelled = false;
+    const now = new Date();
+    const selectedRange = rangeConfig[range];
+    const start = new Date(now.getTime() - selectedRange.hours * 60 * 60 * 1000);
+
+    fetchStationData({
+      stationId: station.id,
+      startTime: start,
+      endTime: now,
+      resolution: selectedRange.resolution,
+      currentUser: { id: 1 },
+    }).then((points) => {
+      if (cancelled) return;
+      const normalized = normalizeSeries(points, range);
+      setBackendSeries(normalized);
+      setDataSource(normalized.length > 0 ? "backend" : "mock");
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [range, station.id]);
 
   return (
     <section className="space-y-4">
@@ -106,7 +161,8 @@ export default function StationParameters({ onBack, station }) {
           <div>
             <h2 className="text-lg font-semibold">Biểu đồ biến thiên thông số</h2>
             <p className="text-sm text-slate-500">
-              Dữ liệu mock theo {rangeOptions.find((item) => item.value === range)?.label.toLowerCase()}, sẵn sàng nối API Envisoft-like.
+              Dữ liệu {dataSource === "backend" ? "từ Backend API + TimescaleDB" : "mock fallback"} theo{" "}
+              {rangeOptions.find((item) => item.value === range)?.label.toLowerCase()}.
             </p>
           </div>
         </div>
@@ -120,6 +176,7 @@ export default function StationParameters({ onBack, station }) {
               <Legend />
               {metricConfig.map((metric) => (
                 <Line
+                  connectNulls
                   dataKey={metric.key}
                   dot={false}
                   key={metric.key}

@@ -14,6 +14,7 @@ class SensorReading:
     time: datetime
     temperature: float | None
     humidity: float | None
+    wind_speed: float | None
     pm25: float | None
 
 
@@ -39,10 +40,11 @@ def _parse_json(path: Path) -> list[SensorReading]:
 
 def _reading_from_dict(row: dict[str, Any]) -> SensorReading:
     return SensorReading(
-        station_code=str(row["station_code"]).strip(),
-        time=_parse_time(str(row["time"])),
+        station_code=str(row.get("station_code") or row["sensor_id"]).strip(),
+        time=_parse_time(str(row.get("time") or row["timestamp"])),
         temperature=_optional_float(row.get("temperature")),
         humidity=_optional_float(row.get("humidity")),
+        wind_speed=_optional_float(row.get("wind_speed")),
         pm25=_optional_float(row.get("pm25")),
     )
 
@@ -59,4 +61,3 @@ def _optional_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
     return float(value)
-

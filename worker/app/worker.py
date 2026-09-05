@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://monitor:monitor@localhost:5432/environment")
-FTP_INCOMING_DIR = Path(os.getenv("FTP_INCOMING_DIR", "/ftp/incoming"))
+FTP_INCOMING_DIR = Path(os.getenv("FTP_INCOMING_DIR", "/ftp/data"))
 FTP_ARCHIVE_DIR = Path(os.getenv("FTP_ARCHIVE_DIR", "/ftp/archive"))
 FTP_ERROR_DIR = Path(os.getenv("FTP_ERROR_DIR", "/ftp/error"))
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "5"))
@@ -32,7 +32,7 @@ def main() -> None:
 
 
 def process_once() -> None:
-    for path in sorted(FTP_INCOMING_DIR.iterdir()):
+    for path in sorted(FTP_INCOMING_DIR.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in {".csv", ".json"}:
             continue
         destination_dir = FTP_ARCHIVE_DIR
@@ -52,4 +52,3 @@ def process_once() -> None:
 
 if __name__ == "__main__":
     main()
-

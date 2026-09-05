@@ -8,6 +8,15 @@ WARNING_LIMITS = {"pm25": 35.0, "temperature": 38.0, "humidity": 85.0}
 CRITICAL_LIMITS = {"pm25": 150.0, "temperature": 42.0, "humidity": 95.0}
 
 
+async def ensure_runtime_schema(connection) -> None:
+    await connection.execute(
+        """
+        ALTER TABLE sensor_data ADD COLUMN IF NOT EXISTS wind_speed DOUBLE PRECISION;
+        ALTER TABLE latest_station_readings ADD COLUMN IF NOT EXISTS wind_speed DOUBLE PRECISION;
+        """
+    )
+
+
 def resolution_source(resolution: str) -> tuple[str, str]:
     sources = {
         "1m": ("sensor_data", "time"),
@@ -183,12 +192,14 @@ async def fetch_station_data(
 ) -> list[dict]:
     table, bucket_column = resolution_source(resolution)
     samples_expression = "samples" if resolution != "1m" else "NULL::bigint AS samples"
+    wind_speed_expression = "wind_speed" if resolution == "1m" else "NULL::double precision AS wind_speed"
     rows = await connection.fetch(
         f"""
         SELECT
             {bucket_column} AS time,
             temperature,
             humidity,
+            {wind_speed_expression},
             pm25,
             {samples_expression}
         FROM {table}
@@ -226,6 +237,7 @@ async def fetch_live_stations(connection, user: dict) -> list[dict]:
             l.time,
             l.temperature,
             l.humidity,
+            l.wind_speed,
             l.pm25
         FROM stations s
         LEFT JOIN latest_station_readings l ON l.station_id = s.id

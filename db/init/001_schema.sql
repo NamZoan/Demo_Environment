@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS sensor_data (
     station_id BIGINT NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
     temperature DOUBLE PRECISION,
     humidity DOUBLE PRECISION,
+    wind_speed DOUBLE PRECISION,
     pm25 DOUBLE PRECISION,
     received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (station_id, time)
@@ -71,6 +72,7 @@ CREATE TABLE IF NOT EXISTS latest_station_readings (
     time TIMESTAMPTZ NOT NULL,
     temperature DOUBLE PRECISION,
     humidity DOUBLE PRECISION,
+    wind_speed DOUBLE PRECISION,
     pm25 DOUBLE PRECISION,
     status TEXT NOT NULL DEFAULT 'online',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -126,6 +128,7 @@ SELECT
     station_id,
     avg(temperature) AS temperature,
     avg(humidity) AS humidity,
+    avg(wind_speed) AS wind_speed,
     avg(pm25) AS pm25,
     count(*) AS samples
 FROM sensor_data
@@ -139,6 +142,7 @@ SELECT
     station_id,
     avg(temperature) AS temperature,
     avg(humidity) AS humidity,
+    avg(wind_speed) AS wind_speed,
     avg(pm25) AS pm25,
     count(*) AS samples
 FROM sensor_data

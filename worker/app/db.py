@@ -20,8 +20,15 @@ def bulk_upsert_readings(database_url: str, readings: list[SensorReading]) -> in
                     time TIMESTAMPTZ NOT NULL,
                     temperature DOUBLE PRECISION,
                     humidity DOUBLE PRECISION,
+                    wind_speed DOUBLE PRECISION,
                     pm25 DOUBLE PRECISION
                 ) ON COMMIT DROP
+                """
+            )
+            cursor.execute(
+                """
+                ALTER TABLE sensor_data ADD COLUMN IF NOT EXISTS wind_speed DOUBLE PRECISION;
+                ALTER TABLE latest_station_readings ADD COLUMN IF NOT EXISTS wind_speed DOUBLE PRECISION;
                 """
             )
             buffer = StringIO()
@@ -33,6 +40,7 @@ def bulk_upsert_readings(database_url: str, readings: list[SensorReading]) -> in
                             reading.time.isoformat(),
                             _copy_value(reading.temperature),
                             _copy_value(reading.humidity),
+                            _copy_value(reading.wind_speed),
                             _copy_value(reading.pm25),
                         ]
                     )
@@ -40,19 +48,33 @@ def bulk_upsert_readings(database_url: str, readings: list[SensorReading]) -> in
                 )
             buffer.seek(0)
             with cursor.copy(
-                "COPY tmp_sensor_data (station_code, time, temperature, humidity, pm25) FROM STDIN"
+                "COPY tmp_sensor_data (station_code, time, temperature, humidity, wind_speed, pm25) FROM STDIN"
             ) as copy:
                 copy.write(buffer.read())
 
             cursor.execute(
                 """
-                INSERT INTO sensor_data (station_id, time, temperature, humidity, pm25)
-                SELECT s.id, t.time, t.temperature, t.humidity, t.pm25
+                INSERT INTO stations (code, name, status, metadata)
+                SELECT DISTINCT
+                    t.station_code,
+                    'IoT Sensor ' || upper(replace(t.station_code, '_', ' ')),
+                    'active',
+                    jsonb_build_object('type', 'Không khí xung quanh', 'source', 'iot-simulator')
+                FROM tmp_sensor_data t
+                ON CONFLICT (code) DO NOTHING
+                """
+            )
+
+            cursor.execute(
+                """
+                INSERT INTO sensor_data (station_id, time, temperature, humidity, wind_speed, pm25)
+                SELECT s.id, t.time, t.temperature, t.humidity, t.wind_speed, t.pm25
                 FROM tmp_sensor_data t
                 JOIN stations s ON s.code = t.station_code
                 ON CONFLICT (station_id, time) DO UPDATE SET
                     temperature = EXCLUDED.temperature,
                     humidity = EXCLUDED.humidity,
+                    wind_speed = EXCLUDED.wind_speed,
                     pm25 = EXCLUDED.pm25,
                     received_at = now()
                 """
@@ -61,12 +83,13 @@ def bulk_upsert_readings(database_url: str, readings: list[SensorReading]) -> in
 
             cursor.execute(
                 """
-                INSERT INTO latest_station_readings (station_id, time, temperature, humidity, pm25, status)
+                INSERT INTO latest_station_readings (station_id, time, temperature, humidity, wind_speed, pm25, status)
                 SELECT DISTINCT ON (s.id)
                     s.id,
                     t.time,
                     t.temperature,
                     t.humidity,
+                    t.wind_speed,
                     t.pm25,
                     'online'
                 FROM tmp_sensor_data t
@@ -76,6 +99,7 @@ def bulk_upsert_readings(database_url: str, readings: list[SensorReading]) -> in
                     time = EXCLUDED.time,
                     temperature = EXCLUDED.temperature,
                     humidity = EXCLUDED.humidity,
+                    wind_speed = EXCLUDED.wind_speed,
                     pm25 = EXCLUDED.pm25,
                     status = EXCLUDED.status,
                     updated_at = now()
