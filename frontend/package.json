@@ -6,15 +6,16 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
+    "@tanstack/react-table": "^8.21.3",
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
+    "leaflet": "latest",
+    "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "@tanstack/react-table": "^8.21.3",
-    "lucide-react": "latest",
-    "leaflet": "latest",
     "react-leaflet": "latest",
-    "recharts": "latest"
+    "react-router-dom": "^7.18.3",
+    "recharts": "latest",
+    "vite": "latest"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.21",
