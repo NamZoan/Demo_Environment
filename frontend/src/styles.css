@@ -21,6 +21,16 @@ select {
   font: inherit;
 }
 
+button {
+  background: #1f6f8b;
+  border: 0;
+  border-radius: 6px;
+  color: #ffffff;
+  cursor: pointer;
+  min-height: 40px;
+  padding: 8px 12px;
+}
+
 .appShell {
   width: min(1280px, calc(100vw - 32px));
   margin: 0 auto;
@@ -53,6 +63,51 @@ select {
   min-width: 96px;
   padding: 8px 12px;
   text-align: center;
+}
+
+.sessionBox {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.sessionBox span {
+  background: #ffffff;
+  border: 1px solid #d8dee6;
+  border-radius: 6px;
+  color: #44505c;
+  min-height: 40px;
+  padding: 9px 12px;
+}
+
+.loginShell {
+  align-items: center;
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+  place-items: center;
+}
+
+.loginPanel {
+  background: #ffffff;
+  border: 1px solid #d8dee6;
+  border-radius: 8px;
+  display: grid;
+  gap: 14px;
+  max-width: 380px;
+  padding: 24px;
+  width: 100%;
+}
+
+.loginPanel h1 {
+  font-size: 24px;
+  margin: 0 0 4px;
+}
+
+.loginPanel p {
+  color: #9f2d20;
+  min-height: 20px;
+  margin: 0;
 }
 
 .controls {
@@ -126,4 +181,3 @@ select {
     grid-template-columns: 1fr;
   }
 }
-

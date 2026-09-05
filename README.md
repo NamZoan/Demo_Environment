@@ -38,11 +38,21 @@ db/init/001_schema.sql
 
 It creates:
 
+- `users`
 - `stations`
 - `sensor_data` as a TimescaleDB hypertable
 - `sensor_data_hourly` continuous aggregate
 - `sensor_data_daily` continuous aggregate
 - automatic refresh policies for hourly and daily aggregates
+
+Default internal login for local development:
+
+```text
+username: admin
+password: admin@123
+```
+
+The password is seeded through PostgreSQL `pgcrypto` with `crypt(..., gen_salt('bf'))`; change it before production use.
 
 ## FTP Input Format
 
@@ -106,4 +116,3 @@ Supported resolutions:
 ## Production Notes
 
 At 2,000 station files per minute, FTP-based ingestion can become disk I/O bound. For a production FTP deployment, mount the incoming directory on RAM disk and archive asynchronously to durable storage. As the platform grows, move telemetry ingestion to MQTT plus a message queue so writes are streamed and backpressure can be controlled.
-

@@ -14,6 +14,24 @@ def resolution_source(resolution: str) -> tuple[str, str]:
         raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d") from exc
 
 
+def authentication_query() -> str:
+    return """
+        SELECT id, username, full_name, role
+        FROM users
+        WHERE username = $1
+          AND password_hash = crypt($2, password_hash)
+          AND status = 'active'
+        LIMIT 1
+    """
+
+
+async def authenticate_user(connection, username: str, password: str) -> dict | None:
+    row = await connection.fetchrow(authentication_query(), username, password)
+    if row is None:
+        return None
+    return dict(row)
+
+
 async def fetch_stations(connection) -> list[dict]:
     rows = await connection.fetch(
         """

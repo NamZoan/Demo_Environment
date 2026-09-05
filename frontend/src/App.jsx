@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import EnvironmentChart from "./EnvironmentChart.jsx";
-import { fetchStationData, fetchStations } from "./api.js";
+import { fetchStationData, fetchStations, login } from "./api.js";
 
 const initialEnd = new Date();
 const initialStart = new Date(initialEnd.getTime() - 24 * 60 * 60 * 1000);
@@ -12,6 +12,11 @@ function toLocalInputValue(date) {
 }
 
 export default function App() {
+  const [currentUser, setCurrentUser] = useState(() => {
+    const saved = window.localStorage.getItem("currentUser");
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [loginForm, setLoginForm] = useState({ username: "admin", password: "admin@123" });
   const [stations, setStations] = useState([]);
   const [stationId, setStationId] = useState("");
   const [startTime, setStartTime] = useState(toLocalInputValue(initialStart));
@@ -26,6 +31,7 @@ export default function App() {
   const [status, setStatus] = useState("loading");
 
   useEffect(() => {
+    if (!currentUser) return;
     fetchStations()
       .then((items) => {
         setStations(items);
@@ -33,7 +39,7 @@ export default function App() {
         setStatus("idle");
       })
       .catch((error) => setStatus(error.message));
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     if (!stationId) return;
@@ -51,6 +57,53 @@ export default function App() {
     [stations, stationId],
   );
 
+  async function handleLogin(event) {
+    event.preventDefault();
+    setStatus("loading");
+    try {
+      const user = await login(loginForm);
+      window.localStorage.setItem("currentUser", JSON.stringify(user));
+      setCurrentUser(user);
+      setStatus("idle");
+    } catch (error) {
+      setStatus(error.message);
+    }
+  }
+
+  function handleLogout() {
+    window.localStorage.removeItem("currentUser");
+    setCurrentUser(null);
+    setStations([]);
+    setData([]);
+  }
+
+  if (!currentUser) {
+    return (
+      <main className="loginShell">
+        <form className="loginPanel" onSubmit={handleLogin}>
+          <h1>Station Management</h1>
+          <label>
+            Username
+            <input
+              value={loginForm.username}
+              onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))}
+            />
+          </label>
+          <label>
+            Password
+            <input
+              type="password"
+              value={loginForm.password}
+              onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))}
+            />
+          </label>
+          <button type="submit">Sign in</button>
+          <p>{status === "loading" ? "" : status}</p>
+        </form>
+      </main>
+    );
+  }
+
   return (
     <main className="appShell">
       <header className="topBar">
@@ -58,7 +111,12 @@ export default function App() {
           <h1>Environment Monitoring</h1>
           <p>{selectedStation ? `${selectedStation.code} - ${selectedStation.name}` : "No station"}</p>
         </div>
-        <div className="status">{status}</div>
+        <div className="sessionBox">
+          <span>{currentUser.username}</span>
+          <button type="button" onClick={handleLogout}>
+            Sign out
+          </button>
+        </div>
       </header>
 
       <section className="controls">
@@ -112,4 +170,3 @@ export default function App() {
     </main>
   );
 }
-

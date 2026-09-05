@@ -1,6 +1,7 @@
 services:
   db:
-    image: timescale/timescaledb:latest-pg16
+    build:
+      context: ./db
     environment:
       POSTGRES_DB: environment
       POSTGRES_USER: monitor
@@ -9,7 +10,6 @@ services:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U monitor -d environment"]
       interval: 10s
@@ -69,4 +69,3 @@ services:
 volumes:
   db_data:
   ftp_data:
-

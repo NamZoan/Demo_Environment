@@ -5,8 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import database
-from app.repository import fetch_station_data, fetch_stations
-from app.schemas import SensorPoint, Station
+from app.repository import authenticate_user, fetch_station_data, fetch_stations
+from app.schemas import LoginRequest, LoginResponse, SensorPoint, Station
 
 
 app = FastAPI(title="Environment Monitoring API")
@@ -41,6 +41,15 @@ async def list_stations() -> list[dict]:
         return await fetch_stations(connection)
 
 
+@app.post("/api/auth/login", response_model=LoginResponse)
+async def login(payload: LoginRequest) -> dict:
+    async with database.acquire() as connection:
+        user = await authenticate_user(connection, payload.username, payload.password)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    return user
+
+
 @app.get("/api/stations/{station_id}/data", response_model=list[SensorPoint])
 async def station_data(
     station_id: int,
@@ -57,4 +66,3 @@ async def station_data(
 
     async with database.acquire() as connection:
         return await fetch_station_data(connection, station_id, start_time, end_time, resolution)
-

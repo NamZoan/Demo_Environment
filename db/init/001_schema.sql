@@ -1,4 +1,16 @@
 CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    full_name TEXT,
+    role TEXT NOT NULL DEFAULT 'operator',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS stations (
     id BIGSERIAL PRIMARY KEY,
@@ -87,3 +99,11 @@ VALUES
     ('HCM001', 'Ho Chi Minh Urban Station 001', 10.8231, 106.6297, 'Ho Chi Minh City')
 ON CONFLICT (code) DO NOTHING;
 
+INSERT INTO users (username, password_hash, full_name, role, status)
+VALUES ('admin', crypt('admin@123', gen_salt('bf')), 'System Administrator', 'admin', 'active')
+ON CONFLICT (username) DO UPDATE SET
+    password_hash = EXCLUDED.password_hash,
+    full_name = EXCLUDED.full_name,
+    role = EXCLUDED.role,
+    status = EXCLUDED.status,
+    updated_at = now();

@@ -22,3 +22,14 @@ class SensorPoint(BaseModel):
     pm25: float | None
     samples: int | None = None
 
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    id: int
+    username: str
+    full_name: str | None
+    role: str
