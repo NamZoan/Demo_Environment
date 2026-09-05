@@ -83,6 +83,57 @@ export async function fetchLiveStations(currentUser) {
   }
 }
 
+function normalizeStation(row) {
+  const metadata = row.metadata || {};
+  const liveStatus = row.live_status || "offline";
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    region: row.region_name || row.address || (row.region_id ? `Khu vực ${row.region_id}` : "Chưa gán khu vực"),
+    type: metadata.type || "Không khí xung quanh",
+    qcvnStatus: liveStatus === "critical" ? "critical" : liveStatus === "warning" ? "warning" : "normal",
+    datalogger: metadata.datalogger || `DL-${String(row.id).padStart(3, "0")}`,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    status: liveStatus === "offline" ? "offline" : row.status === "maintenance" ? "maintenance" : "online",
+    lastSeenAt: row.last_seen_at || row.time,
+    metrics: {
+      temperature: row.temperature ?? 0,
+      humidity: row.humidity ?? 0,
+      pm25: row.pm25 ?? 0,
+      co: metadata.co ?? Number((0.4 + (row.id % 30) / 10).toFixed(1)),
+    },
+  };
+}
+
+export async function fetchCmsStations(currentUser) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/stations/live`, {
+      headers: userHeaders(currentUser),
+    });
+    if (!response.ok) {
+      throw new Error("Cannot load backend station data");
+    }
+    const rows = await response.json();
+    return { source: "backend", stations: rows.map(normalizeStation) };
+  } catch {
+    return { source: "mock", stations: [] };
+  }
+}
+
+export async function fetchBackendHealth() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/health`);
+    if (!response.ok) {
+      throw new Error("Backend health check failed");
+    }
+    return { ok: true, payload: await response.json() };
+  } catch (error) {
+    return { ok: false, payload: { error: error.message } };
+  }
+}
+
 export function connectLiveStations(currentUser, onMessage) {
   const url = `${WS_BASE_URL}/ws/live?user_id=${encodeURIComponent(currentUser?.id || 1)}`;
   const socket = new WebSocket(url);

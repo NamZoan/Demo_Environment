@@ -1,4 +1,4 @@
-import { Activity, BarChart3, Camera, Database, FileCheck2, MapPinned, Settings, ShieldCheck, Siren } from "lucide-react";
+import { Activity, BarChart3, Camera, Database, FileCheck2, HardDrive, MapPinned, Settings, ShieldCheck, Siren } from "lucide-react";
 
 const menuItems = [
   { id: "dashboard", label: "Điều hành tổng quan", icon: BarChart3 },
@@ -7,6 +7,7 @@ const menuItems = [
   { id: "qcvn", label: "Cảnh báo QCVN", icon: Siren },
   { id: "approval", label: "Kiểm duyệt dữ liệu", icon: FileCheck2 },
   { id: "camera", label: "Camera & Lấy mẫu", icon: Camera },
+  { id: "backend", label: "Backend & Database", icon: HardDrive },
   { id: "settings", label: "Cấu hình hệ thống", icon: Settings },
   { id: "rbac", label: "Phân quyền", icon: ShieldCheck },
 ];
