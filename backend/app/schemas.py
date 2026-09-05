@@ -77,3 +77,26 @@ class Overview(BaseModel):
     warning: int
     critical: int
     offline: int
+
+
+class FtpStatus(BaseModel):
+    connected: bool
+    host: str
+    port: int
+    user: str
+    root_path: str
+    message: str | None = None
+    error: str | None = None
+
+
+class FtpEntry(BaseModel):
+    name: str
+    path: str
+    type: str
+    size: int | None = None
+    modified: str | None = None
+
+
+class FtpListing(BaseModel):
+    path: str
+    entries: list[FtpEntry] = Field(default_factory=list)

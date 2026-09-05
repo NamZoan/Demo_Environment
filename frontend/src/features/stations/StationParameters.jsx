@@ -1,4 +1,17 @@
-import { CalendarDays, Droplets, Flame, Gauge, Thermometer, Wind } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronUp,
+  Droplets,
+  FileText,
+  Flame,
+  Folder,
+  Gauge,
+  MapPin,
+  RefreshCcw,
+  Server,
+  Thermometer,
+  Wind,
+} from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   CartesianGrid,
@@ -12,7 +25,7 @@ import {
 } from "recharts";
 
 import { createMockSeries } from "../../services/mockApi.js";
-import { fetchStationData } from "../../api.js";
+import { fetchFtpFiles, fetchFtpStatus, fetchStationData } from "../../api.js";
 
 const rangeOptions = [
   { value: "day", label: "Ngày" },
@@ -61,6 +74,29 @@ function normalizeSeries(points, range) {
   }));
 }
 
+function defaultFtpPath(station) {
+  return `/data/${station.code}`;
+}
+
+function parentFtpPath(path) {
+  if (!path || path === "/data") return "/data";
+  const segments = path.split("/").filter(Boolean);
+  segments.pop();
+  return `/${segments.join("/") || "data"}`;
+}
+
+function formatDateTime(value) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString("vi-VN");
+}
+
+function formatFileSize(size) {
+  if (size === null || size === undefined) return "-";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function levelFor(value, metric) {
   if (value >= metric.critical) return "critical";
   if (value >= metric.warning) return "warning";
@@ -77,8 +113,23 @@ export default function StationParameters({ onBack, station }) {
   const [range, setRange] = useState("day");
   const [backendSeries, setBackendSeries] = useState([]);
   const [dataSource, setDataSource] = useState("mock");
+  const [ftpStatus, setFtpStatus] = useState(null);
+  const [ftpPath, setFtpPath] = useState(() => defaultFtpPath(station));
+  const [ftpListing, setFtpListing] = useState({ path: defaultFtpPath(station), entries: [] });
+  const [ftpLoading, setFtpLoading] = useState(false);
+  const [ftpRefreshKey, setFtpRefreshKey] = useState(0);
   const mockSeries = useMemo(() => createMockSeries(station.id, range), [range, station.id]);
   const series = backendSeries.length > 0 ? backendSeries : mockSeries;
+  const stationDetails = [
+    { label: "Mã trạm", value: station.code },
+    { label: "Khu vực", value: station.region },
+    { label: "Loại hình", value: station.type },
+    { label: "Datalogger", value: station.datalogger },
+    { label: "Trạng thái", value: station.status },
+    { label: "Lần nhận dữ liệu cuối", value: formatDateTime(station.lastSeenAt) },
+    { label: "Tọa độ", value: `${station.latitude}, ${station.longitude}` },
+    { label: "Nguồn", value: station.code.startsWith("sensor_") ? "IoT simulator qua FTP" : "Database seed/API" },
+  ];
 
   useEffect(() => {
     let cancelled = false;
@@ -103,6 +154,34 @@ export default function StationParameters({ onBack, station }) {
       cancelled = true;
     };
   }, [range, station.id]);
+
+  useEffect(() => {
+    setFtpPath(defaultFtpPath(station));
+  }, [station.code]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchFtpStatus({ id: 1 }).then((status) => {
+      if (!cancelled) setFtpStatus(status);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFtpLoading(true);
+    fetchFtpFiles({ path: ftpPath, currentUser: { id: 1 } }).then((listing) => {
+      if (!cancelled) {
+        setFtpListing(listing);
+        setFtpLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ftpPath, ftpRefreshKey]);
 
   return (
     <section className="space-y-4">
@@ -135,7 +214,7 @@ export default function StationParameters({ onBack, station }) {
         </label>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
         {metricConfig.map((metric) => {
           const Icon = metric.icon;
           const value = station.metrics[metric.key];
@@ -154,6 +233,118 @@ export default function StationParameters({ onBack, station }) {
             </article>
           );
         })}
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[.8fr_1.2fr]">
+        <section className="rounded-lg border border-slate-200 bg-white p-4">
+          <div className="mb-4 flex items-center gap-2">
+            <MapPin className="h-5 w-5 text-cyan-700" />
+            <h2 className="text-lg font-semibold">Thông tin trạm</h2>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {stationDetails.map((item) => (
+              <div className="rounded-md border border-slate-200 px-3 py-2" key={item.label}>
+                <p className="text-xs font-medium uppercase text-slate-400">{item.label}</p>
+                <p className="mt-1 break-words text-sm font-semibold text-slate-800">{item.value || "-"}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-4">
+          <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-center">
+            <div>
+              <div className="flex items-center gap-2">
+                <Server className="h-5 w-5 text-cyan-700" />
+                <h2 className="text-lg font-semibold">FTP đang kết nối</h2>
+              </div>
+              <p className="mt-1 text-sm text-slate-500">
+                {ftpStatus?.host || "127.0.0.1"}:{ftpStatus?.port || 21} - user {ftpStatus?.user || "station"}
+              </p>
+            </div>
+            <span
+              className={`inline-flex w-fit items-center rounded-full px-3 py-1 text-xs font-semibold ${
+                ftpStatus?.connected ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+              }`}
+            >
+              {ftpStatus?.connected ? "Connected" : "Disconnected"}
+            </span>
+          </div>
+
+          {ftpStatus?.error && <p className="mb-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{ftpStatus.error}</p>}
+
+          <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center">
+            <code className="min-w-0 flex-1 rounded-md bg-slate-950 px-3 py-2 text-sm text-cyan-100">{ftpListing.path || ftpPath}</code>
+            <div className="flex gap-2">
+              <button
+                className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                onClick={() => setFtpPath(parentFtpPath(ftpPath))}
+                type="button"
+              >
+                <ChevronUp className="h-4 w-4" />
+                Lên
+              </button>
+              <button
+                className="inline-flex items-center gap-2 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700"
+                onClick={() => setFtpRefreshKey((current) => current + 1)}
+                type="button"
+              >
+                <RefreshCcw className="h-4 w-4" />
+                Refresh
+              </button>
+            </div>
+          </div>
+
+          <div className="max-h-[320px] overflow-auto rounded-md border border-slate-200">
+            <table className="w-full min-w-[620px] text-sm">
+              <thead className="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">Tên</th>
+                  <th className="px-3 py-2">Loại</th>
+                  <th className="px-3 py-2">Dung lượng</th>
+                  <th className="px-3 py-2">Modified</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ftpLoading ? (
+                  <tr>
+                    <td className="px-3 py-5 text-center text-slate-500" colSpan="4">
+                      Đang tải FTP...
+                    </td>
+                  </tr>
+                ) : ftpListing.entries.length > 0 ? (
+                  ftpListing.entries.map((entry) => {
+                    const Icon = entry.type === "folder" ? Folder : FileText;
+                    return (
+                      <tr className="border-t border-slate-100 hover:bg-slate-50" key={entry.path}>
+                        <td className="px-3 py-2">
+                          <button
+                            className="inline-flex max-w-[300px] items-center gap-2 truncate text-left font-medium text-slate-800 disabled:cursor-default"
+                            disabled={entry.type !== "folder"}
+                            onClick={() => setFtpPath(entry.path)}
+                            type="button"
+                          >
+                            <Icon className="h-4 w-4 shrink-0 text-cyan-700" />
+                            <span className="truncate">{entry.name}</span>
+                          </button>
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">{entry.type === "folder" ? "Folder" : "File"}</td>
+                        <td className="px-3 py-2 text-slate-600">{formatFileSize(entry.size)}</td>
+                        <td className="px-3 py-2 text-slate-600">{entry.modified || "-"}</td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td className="px-3 py-5 text-center text-slate-500" colSpan="4">
+                      Chưa có file hoặc không truy cập được thư mục này.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
       <section className="rounded-lg border border-slate-200 bg-white p-4">

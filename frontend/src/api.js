@@ -144,6 +144,46 @@ export async function fetchBackendHealth() {
   }
 }
 
+export async function fetchFtpStatus(currentUser) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/ftp/status`, {
+      headers: userHeaders(currentUser),
+    });
+    if (!response.ok) {
+      throw new Error("Cannot load FTP status");
+    }
+    return response.json();
+  } catch (error) {
+    return {
+      connected: false,
+      host: "127.0.0.1",
+      port: 21,
+      user: "station",
+      root_path: "/data",
+      error: error.message,
+    };
+  }
+}
+
+export async function fetchFtpFiles({ path, currentUser }) {
+  try {
+    const params = new URLSearchParams({ path });
+    const response = await fetch(`${API_BASE_URL}/api/ftp/files?${params}`, {
+      headers: userHeaders(currentUser),
+    });
+    if (!response.ok) {
+      throw new Error("Cannot browse FTP directory");
+    }
+    return response.json();
+  } catch (error) {
+    return {
+      path,
+      entries: [],
+      error: error.message,
+    };
+  }
+}
+
 export function connectLiveStations(currentUser, onMessage) {
   const url = `${WS_BASE_URL}/ws/live?user_id=${encodeURIComponent(currentUser?.id || 1)}`;
   const socket = new WebSocket(url);

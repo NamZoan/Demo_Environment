@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import database
+from app.ftp_browser import FtpConnectionSettings, check_ftp_status, list_ftp_directory
 from app.repository import (
     authenticate_user,
     create_station,
@@ -24,6 +25,8 @@ from app.schemas import (
     LoginRequest,
     LoginResponse,
     Overview,
+    FtpListing,
+    FtpStatus,
     SensorPoint,
     Station,
     StationCreate,
@@ -118,6 +121,41 @@ async def live_stations(user: dict = Depends(current_user)) -> list[dict]:
 async def overview(user: dict = Depends(current_user)) -> dict:
     async with database.acquire() as connection:
         return await fetch_overview(connection, user)
+
+
+def ftp_settings() -> FtpConnectionSettings:
+    return FtpConnectionSettings(
+        host=settings.ftp_host,
+        port=settings.ftp_port,
+        user=settings.ftp_user,
+        password=settings.ftp_password,
+        timeout_seconds=settings.ftp_timeout_seconds,
+    )
+
+
+@app.get("/api/ftp/status", response_model=FtpStatus)
+async def ftp_status(user: dict = Depends(current_user)) -> dict:
+    try:
+        return await asyncio.to_thread(check_ftp_status, ftp_settings())
+    except Exception as exc:
+        return {
+            "connected": False,
+            "host": settings.ftp_host,
+            "port": settings.ftp_port,
+            "user": settings.ftp_user,
+            "root_path": "/data",
+            "error": str(exc),
+        }
+
+
+@app.get("/api/ftp/files", response_model=FtpListing)
+async def ftp_files(path: str = Query("/data"), user: dict = Depends(current_user)) -> dict:
+    try:
+        return await asyncio.to_thread(list_ftp_directory, ftp_settings(), path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Cannot browse FTP directory: {exc}") from exc
 
 
 @app.post("/api/auth/login", response_model=LoginResponse)
