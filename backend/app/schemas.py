@@ -100,3 +100,10 @@ class FtpEntry(BaseModel):
 class FtpListing(BaseModel):
     path: str
     entries: list[FtpEntry] = Field(default_factory=list)
+
+
+class FtpFilePreview(BaseModel):
+    path: str
+    name: str
+    content: str
+    size: int

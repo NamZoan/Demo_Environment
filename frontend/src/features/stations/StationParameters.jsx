@@ -11,6 +11,7 @@ import {
   Server,
   Thermometer,
   Wind,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -25,7 +26,7 @@ import {
 } from "recharts";
 
 import { createMockSeries } from "../../services/mockApi.js";
-import { fetchFtpFiles, fetchFtpStatus, fetchStationData } from "../../api.js";
+import { fetchFtpFile, fetchFtpFiles, fetchFtpStatus, fetchStationData } from "../../api.js";
 
 const rangeOptions = [
   { value: "day", label: "Ngày" },
@@ -97,6 +98,15 @@ function formatFileSize(size) {
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function parseCsvPreview(content) {
+  const lines = content.trim().split(/\r?\n/).filter(Boolean);
+  if (lines.length === 0) return { headers: [], rows: [] };
+  const [headerLine, ...bodyLines] = lines;
+  const headers = headerLine.split(",").map((header) => header.trim());
+  const rows = bodyLines.map((line) => line.split(",").map((cell) => cell.trim()));
+  return { headers, rows };
+}
+
 function levelFor(value, metric) {
   if (value >= metric.critical) return "critical";
   if (value >= metric.warning) return "warning";
@@ -118,8 +128,11 @@ export default function StationParameters({ onBack, station }) {
   const [ftpListing, setFtpListing] = useState({ path: defaultFtpPath(station), entries: [] });
   const [ftpLoading, setFtpLoading] = useState(false);
   const [ftpRefreshKey, setFtpRefreshKey] = useState(0);
+  const [csvPreview, setCsvPreview] = useState(null);
+  const [csvLoading, setCsvLoading] = useState(false);
   const mockSeries = useMemo(() => createMockSeries(station.id, range), [range, station.id]);
   const series = backendSeries.length > 0 ? backendSeries : mockSeries;
+  const parsedCsv = useMemo(() => parseCsvPreview(csvPreview?.content || ""), [csvPreview]);
   const stationDetails = [
     { label: "Mã trạm", value: station.code },
     { label: "Khu vực", value: station.region },
@@ -157,6 +170,7 @@ export default function StationParameters({ onBack, station }) {
 
   useEffect(() => {
     setFtpPath(defaultFtpPath(station));
+    setCsvPreview(null);
   }, [station.code]);
 
   useEffect(() => {
@@ -182,6 +196,23 @@ export default function StationParameters({ onBack, station }) {
       cancelled = true;
     };
   }, [ftpPath, ftpRefreshKey]);
+
+  function openFtpEntry(entry) {
+    if (entry.type === "folder") {
+      setFtpPath(entry.path);
+      setCsvPreview(null);
+      return;
+    }
+    if (!entry.name.toLowerCase().endsWith(".csv")) {
+      setCsvPreview({ name: entry.name, path: entry.path, content: "", error: "Chỉ hỗ trợ xem trước file CSV." });
+      return;
+    }
+    setCsvLoading(true);
+    fetchFtpFile({ path: entry.path, currentUser: { id: 1 } }).then((preview) => {
+      setCsvPreview(preview);
+      setCsvLoading(false);
+    });
+  }
 
   return (
     <section className="space-y-4">
@@ -319,9 +350,8 @@ export default function StationParameters({ onBack, station }) {
                       <tr className="border-t border-slate-100 hover:bg-slate-50" key={entry.path}>
                         <td className="px-3 py-2">
                           <button
-                            className="inline-flex max-w-[300px] items-center gap-2 truncate text-left font-medium text-slate-800 disabled:cursor-default"
-                            disabled={entry.type !== "folder"}
-                            onClick={() => setFtpPath(entry.path)}
+                            className="inline-flex max-w-[300px] items-center gap-2 truncate text-left font-medium text-slate-800 hover:text-cyan-700"
+                            onClick={() => openFtpEntry(entry)}
                             type="button"
                           >
                             <Icon className="h-4 w-4 shrink-0 text-cyan-700" />
@@ -344,6 +374,50 @@ export default function StationParameters({ onBack, station }) {
               </tbody>
             </table>
           </div>
+
+          {(csvLoading || csvPreview) && (
+            <section className="mt-4 rounded-md border border-cyan-200 bg-cyan-50/40">
+              <div className="flex items-center justify-between gap-3 border-b border-cyan-100 px-3 py-2">
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-semibold text-slate-900">Nội dung CSV: {csvPreview?.name || "Đang tải..."}</h3>
+                  <p className="truncate text-xs text-slate-500">{csvPreview?.path || ""}</p>
+                </div>
+                <button className="rounded-md p-1.5 text-slate-500 hover:bg-white" onClick={() => setCsvPreview(null)} type="button">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              {csvLoading ? (
+                <p className="px-3 py-5 text-center text-sm text-slate-500">Đang đọc file CSV...</p>
+              ) : csvPreview?.error ? (
+                <p className="px-3 py-3 text-sm text-red-700">{csvPreview.error}</p>
+              ) : (
+                <div className="max-h-[260px] overflow-auto">
+                  <table className="w-full min-w-[760px] text-sm">
+                    <thead className="bg-white text-left text-xs uppercase text-slate-500">
+                      <tr>
+                        {parsedCsv.headers.map((header) => (
+                          <th className="border-b border-cyan-100 px-3 py-2" key={header}>
+                            {header}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsedCsv.rows.map((row, rowIndex) => (
+                        <tr className="border-b border-cyan-100/70 bg-white/60" key={`${csvPreview.path}-${rowIndex}`}>
+                          {parsedCsv.headers.map((header, cellIndex) => (
+                            <td className="px-3 py-2 text-slate-700" key={`${header}-${cellIndex}`}>
+                              {row[cellIndex] || "-"}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
         </section>
       </div>
 

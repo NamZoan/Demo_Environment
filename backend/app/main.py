@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import database
-from app.ftp_browser import FtpConnectionSettings, check_ftp_status, list_ftp_directory
+from app.ftp_browser import FtpConnectionSettings, check_ftp_status, list_ftp_directory, read_ftp_csv_file
 from app.repository import (
     authenticate_user,
     create_station,
@@ -25,6 +25,7 @@ from app.schemas import (
     LoginRequest,
     LoginResponse,
     Overview,
+    FtpFilePreview,
     FtpListing,
     FtpStatus,
     SensorPoint,
@@ -156,6 +157,16 @@ async def ftp_files(path: str = Query("/data"), user: dict = Depends(current_use
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Cannot browse FTP directory: {exc}") from exc
+
+
+@app.get("/api/ftp/file", response_model=FtpFilePreview)
+async def ftp_file(path: str = Query(...), user: dict = Depends(current_user)) -> dict:
+    try:
+        return await asyncio.to_thread(read_ftp_csv_file, ftp_settings(), path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Cannot read FTP file: {exc}") from exc
 
 
 @app.post("/api/auth/login", response_model=LoginResponse)

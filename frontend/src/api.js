@@ -184,6 +184,27 @@ export async function fetchFtpFiles({ path, currentUser }) {
   }
 }
 
+export async function fetchFtpFile({ path, currentUser }) {
+  try {
+    const params = new URLSearchParams({ path });
+    const response = await fetch(`${API_BASE_URL}/api/ftp/file?${params}`, {
+      headers: userHeaders(currentUser),
+    });
+    if (!response.ok) {
+      throw new Error("Cannot read FTP file");
+    }
+    return response.json();
+  } catch (error) {
+    return {
+      path,
+      name: path.split("/").pop(),
+      content: "",
+      size: 0,
+      error: error.message,
+    };
+  }
+}
+
 export function connectLiveStations(currentUser, onMessage) {
   const url = `${WS_BASE_URL}/ws/live?user_id=${encodeURIComponent(currentUser?.id || 1)}`;
   const socket = new WebSocket(url);

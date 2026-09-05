@@ -3,9 +3,11 @@ from __future__ import annotations
 import posixpath
 from dataclasses import dataclass
 from ftplib import FTP
+from io import BytesIO
 
 
 FTP_ROOT = "/data"
+MAX_PREVIEW_BYTES = 256 * 1024
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,13 @@ def normalize_ftp_path(path: str | None) -> str:
     return normalized
 
 
+def normalize_ftp_csv_file_path(path: str | None) -> str:
+    normalized = normalize_ftp_path(path)
+    if not normalized.lower().endswith(".csv"):
+        raise ValueError("Only CSV files can be previewed")
+    return normalized
+
+
 def check_ftp_status(settings: FtpConnectionSettings) -> dict:
     with _connect(settings) as ftp:
         welcome = ftp.getwelcome()
@@ -52,6 +61,27 @@ def list_ftp_directory(settings: FtpConnectionSettings, path: str | None) -> dic
     return {
         "path": normalized_path,
         "entries": entries,
+    }
+
+
+def read_ftp_csv_file(settings: FtpConnectionSettings, path: str | None) -> dict:
+    normalized_path = normalize_ftp_csv_file_path(path)
+    with _connect(settings) as ftp:
+        buffer = BytesIO()
+
+        def write_chunk(chunk: bytes) -> None:
+            if buffer.tell() + len(chunk) > MAX_PREVIEW_BYTES:
+                raise ValueError("CSV preview file is too large")
+            buffer.write(chunk)
+
+        ftp.retrbinary(f"RETR {normalized_path}", write_chunk)
+
+    content = buffer.getvalue().decode("utf-8-sig")
+    return {
+        "path": normalized_path,
+        "name": posixpath.basename(normalized_path),
+        "content": content,
+        "size": len(content.encode("utf-8")),
     }
 
 
