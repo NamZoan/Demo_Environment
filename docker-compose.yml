@@ -1,0 +1,72 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: environment
+      POSTGRES_USER: monitor
+      POSTGRES_PASSWORD: monitor
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U monitor -d environment"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  ftp-server:
+    image: fauria/vsftpd
+    environment:
+      FTP_USER: station
+      FTP_PASS: stationpass
+      PASV_ADDRESS: 127.0.0.1
+      PASV_MIN_PORT: 21100
+      PASV_MAX_PORT: 21110
+      LOCAL_UMASK: "022"
+    ports:
+      - "21:21"
+      - "21100-21110:21100-21110"
+    volumes:
+      - ftp_data:/home/vsftpd/station
+
+  ftp-worker:
+    build:
+      context: ./worker
+    environment:
+      DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
+      FTP_INCOMING_DIR: /ftp/incoming
+      FTP_ARCHIVE_DIR: /ftp/archive
+      FTP_ERROR_DIR: /ftp/error
+      POLL_SECONDS: 5
+    volumes:
+      - ftp_data:/ftp
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
+  ftp_data:
+
