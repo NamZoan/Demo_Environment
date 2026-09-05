@@ -1,9 +1,10 @@
-import { Activity, AlertTriangle, Camera, CheckCircle2, Database, FileCheck2, MapPinned, ServerCog, Siren } from "lucide-react";
+import { Database } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { fetchBackendHealth, fetchCmsStations } from "./api.js";
 import AdminLayout from "./components/layout/AdminLayout.jsx";
+import Dashboard from "./features/dashboard/Dashboard.jsx";
 import StationManager from "./features/stations/StationManager.jsx";
 import StationParameters from "./features/stations/StationParameters.jsx";
 import { addStation, createMockStations } from "./services/mockApi.js";
@@ -31,113 +32,6 @@ function activePageFromPath(pathname) {
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/rbac")) return "rbac";
   return "dashboard";
-}
-
-function Dashboard({ dataSource, stations, onOpenStations }) {
-  const counts = useMemo(
-    () =>
-      stations.reduce(
-        (summary, station) => {
-          summary[station.status] += 1;
-          return summary;
-        },
-        { total: stations.length, online: 0, offline: 0, maintenance: 0 },
-      ),
-    [stations],
-  );
-  const qcvnWarnings = stations.filter((station) => station.qcvnStatus === "warning").length;
-  const qcvnCritical = stations.filter((station) => station.qcvnStatus === "critical").length;
-  const typeCounts = stations.reduce((summary, station) => {
-    summary[station.type] = (summary[station.type] || 0) + 1;
-    return summary;
-  }, {});
-
-  const cards = [
-    { label: "Tổng trạm", value: counts.total, icon: MapPinned, tone: "bg-cyan-50 text-cyan-800" },
-    { label: "Đang online", value: counts.online, icon: Activity, tone: "bg-emerald-50 text-emerald-800" },
-    { label: "Mất tín hiệu", value: counts.offline, icon: AlertTriangle, tone: "bg-red-50 text-red-800" },
-    { label: "Bảo trì", value: counts.maintenance, icon: ServerCog, tone: "bg-amber-50 text-amber-800" },
-  ];
-
-  return (
-    <section className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-950">Điều hành dữ liệu quan trắc tự động</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Màn hình nghiệp vụ theo luồng Envisoft: tiếp nhận dữ liệu, giám sát WebGIS, cảnh báo QCVN và kiểm duyệt.
-        </p>
-        <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-          <Database className="h-3.5 w-3.5 text-cyan-700" />
-          Nguồn dữ liệu: {dataSource === "backend" ? "Backend API + PostgreSQL/TimescaleDB" : "Mock fallback"}
-        </div>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {cards.map((card) => {
-          const Icon = card.icon;
-          return (
-            <article className={`rounded-lg border border-slate-200 p-4 ${card.tone}`} key={card.label}>
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">{card.label}</span>
-                <Icon className="h-5 w-5" />
-              </div>
-              <strong className="mt-4 block text-3xl">{card.value}</strong>
-            </article>
-          );
-        })}
-      </div>
-      <div className="grid gap-4 xl:grid-cols-[1.2fr_.8fr]">
-        <section className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Giám sát nghiệp vụ</h2>
-            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">Realtime</span>
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-md border border-red-200 bg-red-50 p-3 text-red-800">
-              <Siren className="mb-3 h-5 w-5" />
-              <p className="text-sm font-medium">Vượt QCVN nghiêm trọng</p>
-              <strong className="mt-2 block text-2xl">{qcvnCritical}</strong>
-            </div>
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-800">
-              <AlertTriangle className="mb-3 h-5 w-5" />
-              <p className="text-sm font-medium">Cảnh báo cần kiểm tra</p>
-              <strong className="mt-2 block text-2xl">{qcvnWarnings}</strong>
-            </div>
-            <div className="rounded-md border border-cyan-200 bg-cyan-50 p-3 text-cyan-800">
-              <FileCheck2 className="mb-3 h-5 w-5" />
-              <p className="text-sm font-medium">Lô dữ liệu chờ duyệt</p>
-              <strong className="mt-2 block text-2xl">128</strong>
-            </div>
-          </div>
-        </section>
-
-        <section className="rounded-lg border border-slate-200 bg-white p-4">
-          <h2 className="text-lg font-semibold">Loại hình quan trắc</h2>
-          <div className="mt-4 space-y-3">
-            {Object.entries(typeCounts).map(([type, value]) => (
-              <div className="flex items-center justify-between text-sm" key={type}>
-                <span className="text-slate-600">{type}</span>
-                <strong>{value}</strong>
-              </div>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <button className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white" onClick={onOpenStations} type="button">
-          Mở WebGIS & quản lý trạm
-        </button>
-        <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700" type="button">
-          <Camera className="h-4 w-4" />
-          Theo dõi camera
-        </button>
-        <button className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700" type="button">
-          <CheckCircle2 className="h-4 w-4" />
-          Kiểm duyệt dữ liệu
-        </button>
-      </div>
-    </section>
-  );
 }
 
 function PlaceholderPage({ title, description }) {
