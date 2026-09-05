@@ -1,0 +1,37 @@
+services:
+  ftp-server:
+    image: fauria/vsftpd
+    environment:
+      FTP_USER: station
+      FTP_PASS: stationpass
+      PASV_ADDRESS: ftp-server
+      PASV_MIN_PORT: 21100
+      PASV_MAX_PORT: 21110
+      LOCAL_UMASK: "022"
+    ports:
+      - "2121:21"
+      - "21100-21110:21100-21110"
+    volumes:
+      - ftp_data:/home/vsftpd/station
+
+  sensor-simulator:
+    build:
+      context: .
+    environment:
+      SENSOR_COUNT: 100
+      INTERVAL_SECONDS: 60
+      FTP_HOST: ftp-server
+      FTP_PORT: 21
+      FTP_USER: station
+      FTP_PASSWORD: stationpass
+      REMOTE_BASE_DIR: /data
+      LOCAL_OUTBOX_DIR: /tmp/iot-outbox
+      UPLOAD_RETRIES: 3
+      RETRY_BACKOFF_SECONDS: 3
+      FTP_PASSIVE_MODE: "true"
+      LOG_LEVEL: INFO
+    depends_on:
+      - ftp-server
+
+volumes:
+  ftp_data:
