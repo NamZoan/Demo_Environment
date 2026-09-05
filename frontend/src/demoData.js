@@ -24,6 +24,17 @@ export const demoStations = [
   },
 ];
 
+export const demoLiveStations = demoStations.map((station, index) => ({
+  ...station,
+  region_id: index + 1,
+  last_seen_at: new Date(now - index * 4 * 60 * 1000).toISOString(),
+  time: new Date(now - index * 4 * 60 * 1000).toISOString(),
+  temperature: index === 0 ? 31.5 : 28.2,
+  humidity: index === 0 ? 74 : 88,
+  pm25: index === 0 ? 42 : 18,
+  live_status: index === 0 ? "warning" : "online",
+}));
+
 export function demoSensorData(stationId) {
   const stationOffset = Number(stationId) === 2 ? 3 : 0;
   return Array.from({ length: 24 }, (_, index) => {
@@ -37,4 +48,3 @@ export function demoSensorData(stationId) {
     };
   });
 }
-

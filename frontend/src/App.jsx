@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 
 import EnvironmentChart from "./EnvironmentChart.jsx";
-import { fetchStationData, fetchStations, login } from "./api.js";
+import LiveStationTable from "./LiveStationTable.jsx";
+import StationMap from "./StationMap.jsx";
+import { connectLiveStations, fetchLiveStations, fetchStationData, fetchStations, login } from "./api.js";
 
 const initialEnd = new Date();
 const initialStart = new Date(initialEnd.getTime() - 24 * 60 * 60 * 1000);
@@ -18,6 +20,7 @@ export default function App() {
   });
   const [loginForm, setLoginForm] = useState({ username: "admin", password: "admin@123" });
   const [stations, setStations] = useState([]);
+  const [liveStations, setLiveStations] = useState([]);
   const [stationId, setStationId] = useState("");
   const [startTime, setStartTime] = useState(toLocalInputValue(initialStart));
   const [endTime, setEndTime] = useState(toLocalInputValue(initialEnd));
@@ -32,7 +35,7 @@ export default function App() {
 
   useEffect(() => {
     if (!currentUser) return;
-    fetchStations()
+    fetchStations(currentUser)
       .then((items) => {
         setStations(items);
         setStationId(items[0]?.id ? String(items[0].id) : "");
@@ -42,9 +45,45 @@ export default function App() {
   }, [currentUser]);
 
   useEffect(() => {
+    if (!currentUser) return;
+    let socket;
+    let cancelled = false;
+
+    fetchLiveStations(currentUser).then((items) => {
+      if (!cancelled) {
+        setLiveStations(items);
+        if (items[0]?.id) {
+          setStationId((current) => current || String(items[0].id));
+        }
+      }
+    });
+
+    try {
+      socket = connectLiveStations(currentUser, (items) => {
+        setLiveStations(items);
+        setStatus("idle");
+      });
+      socket.addEventListener("error", () => {
+        fetchLiveStations(currentUser).then((items) => {
+          if (!cancelled) setLiveStations(items);
+        });
+      });
+    } catch {
+      fetchLiveStations(currentUser).then((items) => {
+        if (!cancelled) setLiveStations(items);
+      });
+    }
+
+    return () => {
+      cancelled = true;
+      if (socket) socket.close();
+    };
+  }, [currentUser]);
+
+  useEffect(() => {
     if (!stationId) return;
     setStatus("loading");
-    fetchStationData({ stationId, startTime, endTime, resolution })
+    fetchStationData({ stationId, startTime, endTime, resolution, currentUser })
       .then((items) => {
         setData(items);
         setStatus("idle");
@@ -53,9 +92,19 @@ export default function App() {
   }, [stationId, startTime, endTime, resolution]);
 
   const selectedStation = useMemo(
-    () => stations.find((station) => String(station.id) === stationId),
-    [stations, stationId],
+    () =>
+      liveStations.find((station) => String(station.id) === stationId) ||
+      stations.find((station) => String(station.id) === stationId),
+    [liveStations, stations, stationId],
   );
+
+  const overview = useMemo(() => {
+    const seed = { total: liveStations.length, online: 0, warning: 0, critical: 0, offline: 0 };
+    return liveStations.reduce((counts, station) => {
+      counts[station.live_status] += 1;
+      return counts;
+    }, seed);
+  }, [liveStations]);
 
   async function handleLogin(event) {
     event.preventDefault();
@@ -74,6 +123,7 @@ export default function App() {
     window.localStorage.removeItem("currentUser");
     setCurrentUser(null);
     setStations([]);
+    setLiveStations([]);
     setData([]);
   }
 
@@ -149,6 +199,28 @@ export default function App() {
             <option value="1d">1 day</option>
           </select>
         </label>
+      </section>
+
+      <section className="overviewGrid">
+        {Object.entries(overview).map(([key, value]) => (
+          <div className="overviewItem" key={key}>
+            <span>{key}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </section>
+
+      <section className="operationsGrid">
+        <StationMap
+          stations={liveStations.length ? liveStations : stations}
+          selectedStationId={stationId}
+          onSelectStation={setStationId}
+        />
+        <LiveStationTable
+          stations={liveStations.length ? liveStations : stations}
+          selectedStationId={stationId}
+          onSelectStation={setStationId}
+        />
       </section>
 
       <section className="metricToggles">

@@ -10,7 +10,7 @@ The stack contains TimescaleDB, a FastAPI backend, an FTP server, a Python FTP w
 
 ## Data Model
 
-`stations` stores station identity, location, status, and metadata. `sensor_data` stores `time`, `station_id`, `temperature`, `humidity`, and `pm25`, with a primary key on `(station_id, time)` and a hypertable partitioned by `time`. Continuous aggregates compute 1-hour and 1-day averages.
+`roles`, `users`, `user_roles`, `regions`, and `user_regions` provide the RBAC base. `stations` stores station identity, location, region ownership, operational status, metadata, and `last_seen_at`. `sensor_data` stores `time`, `station_id`, `temperature`, `humidity`, and `pm25`, with a primary key on `(station_id, time)` and a hypertable partitioned by `time`. `latest_station_readings` stores the newest reading per station for map and live-table queries. `alert_configs` stores warning and critical thresholds by region or station. `audit_logs` records station create, update, and delete operations.
 
 ## Backend API
 
@@ -18,9 +18,17 @@ FastAPI exposes:
 
 - `GET /health`
 - `GET /api/stations`
+- `POST /api/stations`
+- `PUT /api/stations/{station_id}`
+- `DELETE /api/stations/{station_id}`
+- `GET /api/stations/live`
+- `GET /api/overview`
 - `GET /api/stations/{station_id}/data?start_time=&end_time=&resolution=1m|1h|1d`
+- `WS /ws/live`
 
 The data endpoint validates the requested resolution and selects the raw table or aggregate view. Query parameters use ISO timestamps.
+
+RBAC is enforced in the backend through a current-user context resolved from `X-User-Id` for REST and `user_id` for WebSocket demo mode. `super_admin` can manage every station. `manager` can create, update, and delete stations only inside assigned regions. `viewer` has read-only access.
 
 ## FTP Worker
 
@@ -30,14 +38,18 @@ The worker supports:
 - JSON files as either a single object or an array of objects with the same keys
 - bulk insert using PostgreSQL `COPY`
 - idempotent upsert semantics through a temporary table plus `ON CONFLICT (station_id, time) DO UPDATE`
+- update `latest_station_readings` and `stations.last_seen_at` after successful ingest
 
 Files are moved from `/ftp/incoming` to `/ftp/archive` after success and `/ftp/error` after failure.
 
 ## Frontend
 
-React + Vite renders a dashboard with station selector, time inputs, resolution selector, metric toggles, and a Recharts line chart for temperature, humidity, and PM2.5.
+React + Vite renders an operations dashboard with KPI counts, Leaflet station map, live station table, station selector, time inputs, resolution selector, metric toggles, and a Recharts line chart for temperature, humidity, and PM2.5. The map and table consume WebSocket updates from `/ws/live` with REST/demo fallback.
+
+## API Gateway
+
+The production frontend container uses nginx as a basic API gateway. It serves the React static assets, proxies `/api/*` and `/health` to FastAPI, and upgrades `/ws/*` WebSocket traffic to the backend.
 
 ## Operational Notes
 
 FTP file ingestion can become disk I/O bound when 2,000 files arrive every minute. Production deployments should mount the FTP incoming folder on RAM disk or migrate ingestion to MQTT plus a message queue when the system grows.
-

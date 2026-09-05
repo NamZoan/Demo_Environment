@@ -143,6 +143,161 @@ select {
   margin: 10px 0 16px;
 }
 
+.overviewGrid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(110px, 1fr));
+  margin: 12px 0;
+}
+
+.overviewItem {
+  background: #ffffff;
+  border: 1px solid #d8dee6;
+  border-radius: 6px;
+  min-height: 72px;
+  padding: 12px;
+}
+
+.overviewItem span {
+  color: #59636e;
+  display: block;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.overviewItem strong {
+  display: block;
+  font-size: 28px;
+  line-height: 1.2;
+  margin-top: 6px;
+}
+
+.operationsGrid {
+  align-items: stretch;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(360px, 1fr) minmax(460px, 1.2fr);
+  margin: 12px 0 16px;
+}
+
+.mapPanel,
+.livePanel {
+  background: #ffffff;
+  border: 1px solid #d8dee6;
+  border-radius: 8px;
+  min-height: 420px;
+  overflow: hidden;
+}
+
+.stationMap {
+  height: 420px;
+  width: 100%;
+}
+
+.stationMarker {
+  background: transparent;
+  border: 0;
+}
+
+.stationMarker span {
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 1px 8px rgba(31, 41, 51, 0.35);
+  display: block;
+  height: 18px;
+  width: 18px;
+}
+
+.panelHeader {
+  align-items: center;
+  border-bottom: 1px solid #d8dee6;
+  display: flex;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 10px 12px;
+}
+
+.panelHeader h2 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.panelHeader span {
+  color: #59636e;
+  font-size: 13px;
+}
+
+.tableWrap {
+  max-height: 368px;
+  overflow: auto;
+}
+
+table {
+  border-collapse: collapse;
+  font-size: 13px;
+  width: 100%;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e5e9ef;
+  padding: 10px 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+th {
+  background: #f7f9fb;
+  color: #59636e;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+tbody tr {
+  cursor: pointer;
+}
+
+tbody tr:hover,
+.selectedRow {
+  background: #eef6f8;
+}
+
+td span {
+  color: #59636e;
+  display: block;
+  margin-top: 3px;
+}
+
+.statusPill {
+  border-radius: 999px;
+  color: #ffffff;
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  margin: 0;
+  min-width: 70px;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.statusPill.online {
+  background: #21835b;
+}
+
+.statusPill.warning {
+  background: #b7791f;
+}
+
+.statusPill.critical {
+  background: #c2410c;
+}
+
+.statusPill.offline {
+  background: #6b7280;
+}
+
 .metricToggles label {
   align-items: center;
   background: #ffffff;
@@ -179,5 +334,14 @@ select {
 
   .controls {
     grid-template-columns: 1fr;
+  }
+
+  .overviewGrid,
+  .operationsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .stationMap {
+    height: 360px;
   }
 }

@@ -57,9 +57,49 @@ def bulk_upsert_readings(database_url: str, readings: list[SensorReading]) -> in
                     received_at = now()
                 """
             )
-            return cursor.rowcount
+            inserted = cursor.rowcount
+
+            cursor.execute(
+                """
+                INSERT INTO latest_station_readings (station_id, time, temperature, humidity, pm25, status)
+                SELECT DISTINCT ON (s.id)
+                    s.id,
+                    t.time,
+                    t.temperature,
+                    t.humidity,
+                    t.pm25,
+                    'online'
+                FROM tmp_sensor_data t
+                JOIN stations s ON s.code = t.station_code
+                ORDER BY s.id, t.time DESC
+                ON CONFLICT (station_id) DO UPDATE SET
+                    time = EXCLUDED.time,
+                    temperature = EXCLUDED.temperature,
+                    humidity = EXCLUDED.humidity,
+                    pm25 = EXCLUDED.pm25,
+                    status = EXCLUDED.status,
+                    updated_at = now()
+                WHERE latest_station_readings.time <= EXCLUDED.time
+                """
+            )
+
+            cursor.execute(
+                """
+                UPDATE stations s
+                SET last_seen_at = latest.time,
+                    updated_at = now()
+                FROM (
+                    SELECT s2.id AS station_id, max(t.time) AS time
+                    FROM tmp_sensor_data t
+                    JOIN stations s2 ON s2.code = t.station_code
+                    GROUP BY s2.id
+                ) latest
+                WHERE s.id = latest.station_id
+                  AND (s.last_seen_at IS NULL OR s.last_seen_at <= latest.time)
+                """
+            )
+            return inserted
 
 
 def _copy_value(value: float | None) -> str:
     return "\\N" if value is None else str(value)
-

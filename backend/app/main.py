@@ -1,12 +1,33 @@
+import asyncio
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException, Query
+import asyncpg
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import database
-from app.repository import authenticate_user, fetch_station_data, fetch_stations
-from app.schemas import LoginRequest, LoginResponse, SensorPoint, Station
+from app.repository import (
+    authenticate_user,
+    create_station,
+    delete_station,
+    fetch_live_stations,
+    fetch_overview,
+    fetch_station_data,
+    fetch_stations_for_user,
+    fetch_user_context,
+    update_station,
+)
+from app.schemas import (
+    LiveStation,
+    LoginRequest,
+    LoginResponse,
+    Overview,
+    SensorPoint,
+    Station,
+    StationCreate,
+    StationUpdate,
+)
 
 
 app = FastAPI(title="Environment Monitoring API")
@@ -35,10 +56,65 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/api/stations", response_model=list[Station])
-async def list_stations() -> list[dict]:
+async def current_user(x_user_id: int = Header(1, alias="X-User-Id")) -> dict:
     async with database.acquire() as connection:
-        return await fetch_stations(connection)
+        context = await fetch_user_context(connection, x_user_id)
+    return {"id": x_user_id, **context}
+
+
+@app.get("/api/stations", response_model=list[Station])
+async def list_stations(user: dict = Depends(current_user)) -> list[dict]:
+    async with database.acquire() as connection:
+        return await fetch_stations_for_user(connection, user)
+
+
+@app.post("/api/stations", response_model=Station, status_code=201)
+async def add_station(payload: StationCreate, user: dict = Depends(current_user)) -> dict:
+    async with database.acquire() as connection:
+        try:
+            return await create_station(connection, payload.model_dump(), user)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except asyncpg.UniqueViolationError as exc:
+            raise HTTPException(status_code=409, detail="Station code already exists") from exc
+
+
+@app.put("/api/stations/{station_id}", response_model=Station)
+async def edit_station(station_id: int, payload: StationUpdate, user: dict = Depends(current_user)) -> dict:
+    async with database.acquire() as connection:
+        try:
+            station = await update_station(connection, station_id, payload.model_dump(exclude_unset=True), user)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except asyncpg.UniqueViolationError as exc:
+            raise HTTPException(status_code=409, detail="Station code already exists") from exc
+    if station is None:
+        raise HTTPException(status_code=404, detail="Station not found")
+    return station
+
+
+@app.delete("/api/stations/{station_id}", status_code=204)
+async def remove_station(station_id: int, user: dict = Depends(current_user)) -> Response:
+    async with database.acquire() as connection:
+        try:
+            deleted = await delete_station(connection, station_id, user)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Station not found")
+    return Response(status_code=204)
+
+
+@app.get("/api/stations/live", response_model=list[LiveStation])
+async def live_stations(user: dict = Depends(current_user)) -> list[dict]:
+    async with database.acquire() as connection:
+        return await fetch_live_stations(connection, user)
+
+
+@app.get("/api/overview", response_model=Overview)
+async def overview(user: dict = Depends(current_user)) -> dict:
+    async with database.acquire() as connection:
+        return await fetch_overview(connection, user)
 
 
 @app.post("/api/auth/login", response_model=LoginResponse)
@@ -66,3 +142,19 @@ async def station_data(
 
     async with database.acquire() as connection:
         return await fetch_station_data(connection, station_id, start_time, end_time, resolution)
+
+
+@app.websocket("/ws/live")
+async def websocket_live(websocket: WebSocket, user_id: int = 1) -> None:
+    await websocket.accept()
+    user = {"id": user_id}
+    try:
+        async with database.acquire() as connection:
+            user.update(await fetch_user_context(connection, user_id))
+        while True:
+            async with database.acquire() as connection:
+                payload = await fetch_live_stations(connection, user)
+            await websocket.send_json({"type": "stations.live", "stations": payload})
+            await asyncio.sleep(5)
+    except WebSocketDisconnect:
+        return

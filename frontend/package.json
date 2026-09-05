@@ -9,8 +9,9 @@
     "vite": "latest",
     "react": "latest",
     "react-dom": "latest",
+    "leaflet": "latest",
+    "react-leaflet": "latest",
     "recharts": "latest"
   },
   "devDependencies": {}
 }
-
