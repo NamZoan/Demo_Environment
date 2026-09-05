@@ -52,10 +52,15 @@ ON CONFLICT (code) DO UPDATE SET
     last_seen_at = EXCLUDED.last_seen_at,
     updated_at = now();
 
+DELETE FROM sensor_data
+USING stations
+WHERE sensor_data.station_id = stations.id
+  AND stations.code LIKE 'ENV-%';
+
 INSERT INTO sensor_data (station_id, time, temperature, humidity, pm25)
 SELECT
     stations.id,
-    now() - make_interval(hours => points.step),
+    TIMESTAMPTZ '2026-09-05 09:00:00+00' - make_interval(hours => points.step),
     round((24 + mod(stations.id, 16) + sin(points.step / 3.0) * 2)::numeric, 2)::double precision,
     round((52 + mod(stations.id + points.step, 42))::numeric, 2)::double precision,
     round((12 + mod(stations.id + points.step, 95))::numeric, 2)::double precision
