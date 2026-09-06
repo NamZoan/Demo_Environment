@@ -61,11 +61,24 @@ class AnalyticsPoint(BaseModel):
     station_id: int
     time: datetime
     value: float | None
+    station_code: str | None = None
+    station_name: str | None = None
+    metric: str | None = None
+    aqi_level: str | None = None
 
 
 class ScatterPoint(BaseModel):
+    time: datetime | None = None
+    station_id: int | None = None
     x: float | None
     y: float | None
+
+
+class HeatmapPoint(BaseModel):
+    day: str
+    hour: int
+    value: float | None
+    level: str | None = None
 
 
 class QueryMeta(BaseModel):

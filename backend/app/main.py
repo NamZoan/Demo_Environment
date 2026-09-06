@@ -15,6 +15,9 @@ from app.repository import (
     create_station,
     delete_station,
     ensure_runtime_schema,
+    fetch_analytics_heatmap,
+    fetch_analytics_scatter,
+    fetch_analytics_series,
     fetch_live_stations,
     fetch_overview,
     fetch_station_data,
@@ -23,10 +26,13 @@ from app.repository import (
     update_station,
 )
 from app.schemas import (
+    AnalyticsPoint,
+    HeatmapPoint,
     LiveStation,
     LoginRequest,
     LoginResponse,
     Overview,
+    ScatterPoint,
     FtpFilePreview,
     FtpListing,
     FtpStatus,
@@ -69,6 +75,13 @@ async def current_user(x_user_id: int = Header(1, alias="X-User-Id")) -> dict:
     async with database.acquire() as connection:
         context = await fetch_user_context(connection, x_user_id)
     return {"id": x_user_id, **context}
+
+
+def parse_id_list(value: str) -> list[int]:
+    try:
+        return [int(item.strip()) for item in value.split(",") if item.strip()]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="IDs must be comma-separated integers") from exc
 
 
 @app.get("/api/stations", response_model=list[Station])
@@ -124,6 +137,54 @@ async def live_stations(user: dict = Depends(current_user)) -> list[dict]:
 async def overview(user: dict = Depends(current_user)) -> dict:
     async with database.acquire() as connection:
         return await fetch_overview(connection, user)
+
+
+@app.get("/api/analytics/series", response_model=list[AnalyticsPoint])
+async def analytics_series(
+    station_ids: str = Query(...),
+    metric: str = Query("pm25"),
+    start_time: datetime = Query(...),
+    end_time: datetime = Query(...),
+    resolution: str = Query("1h", pattern="^(1m|1h|1d)$"),
+    user: dict = Depends(current_user),
+) -> list[dict]:
+    async with database.acquire() as connection:
+        try:
+            return await fetch_analytics_series(connection, parse_id_list(station_ids), metric, start_time, end_time, resolution)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/analytics/heatmap", response_model=list[HeatmapPoint])
+async def analytics_heatmap(
+    station_id: int,
+    metric: str = Query("pm25"),
+    start_time: datetime = Query(...),
+    end_time: datetime = Query(...),
+    user: dict = Depends(current_user),
+) -> list[dict]:
+    async with database.acquire() as connection:
+        try:
+            return await fetch_analytics_heatmap(connection, station_id, metric, start_time, end_time)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/analytics/scatter", response_model=list[ScatterPoint])
+async def analytics_scatter(
+    station_id: int,
+    x_metric: str = Query("temperature"),
+    y_metric: str = Query("pm25"),
+    start_time: datetime = Query(...),
+    end_time: datetime = Query(...),
+    resolution: str = Query("1h", pattern="^(1m|1h|1d)$"),
+    user: dict = Depends(current_user),
+) -> list[dict]:
+    async with database.acquire() as connection:
+        try:
+            return await fetch_analytics_scatter(connection, station_id, x_metric, y_metric, start_time, end_time, resolution)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def ftp_settings() -> FtpConnectionSettings:

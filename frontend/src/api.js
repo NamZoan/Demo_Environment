@@ -83,6 +83,51 @@ export async function fetchLiveStations(currentUser) {
   }
 }
 
+export async function fetchAnalyticsSeries({ stationIds, metric, startTime, endTime, resolution, currentUser }) {
+  const params = new URLSearchParams({
+    station_ids: stationIds.join(","),
+    metric,
+    start_time: new Date(startTime).toISOString(),
+    end_time: new Date(endTime).toISOString(),
+    resolution,
+  });
+  const response = await fetch(`${API_BASE_URL}/api/analytics/series?${params}`, {
+    headers: userHeaders(currentUser),
+  });
+  if (!response.ok) throw new Error("Cannot load analytics series");
+  return response.json();
+}
+
+export async function fetchAnalyticsHeatmap({ stationId, metric, startTime, endTime, currentUser }) {
+  const params = new URLSearchParams({
+    station_id: String(stationId),
+    metric,
+    start_time: new Date(startTime).toISOString(),
+    end_time: new Date(endTime).toISOString(),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/analytics/heatmap?${params}`, {
+    headers: userHeaders(currentUser),
+  });
+  if (!response.ok) throw new Error("Cannot load analytics heatmap");
+  return response.json();
+}
+
+export async function fetchAnalyticsScatter({ stationId, xMetric, yMetric, startTime, endTime, resolution, currentUser }) {
+  const params = new URLSearchParams({
+    station_id: String(stationId),
+    x_metric: xMetric,
+    y_metric: yMetric,
+    start_time: new Date(startTime).toISOString(),
+    end_time: new Date(endTime).toISOString(),
+    resolution,
+  });
+  const response = await fetch(`${API_BASE_URL}/api/analytics/scatter?${params}`, {
+    headers: userHeaders(currentUser),
+  });
+  if (!response.ok) throw new Error("Cannot load analytics scatter");
+  return response.json();
+}
+
 function normalizeStation(row) {
   const metadata = row.metadata || {};
   const liveStatus = row.live_status || "offline";

@@ -11,6 +11,12 @@ MAX_INTERACTIVE_POINTS_DEFAULT = 1000
 MIN_INTERACTIVE_POINTS = 100
 MAX_INTERACTIVE_POINTS = 5000
 MAX_INTERACTIVE_RANGE = timedelta(days=365 * 5)
+SENSOR_METRIC_COLUMNS = {
+    "temperature": "temperature",
+    "humidity": "humidity",
+    "wind_speed": "wind_speed",
+    "pm25": "pm25",
+}
 RESOLUTION_DURATIONS = {
     "1m": timedelta(minutes=1),
     "1h": timedelta(hours=1),
@@ -25,6 +31,25 @@ async def ensure_runtime_schema(connection) -> None:
         ALTER TABLE latest_station_readings ADD COLUMN IF NOT EXISTS wind_speed DOUBLE PRECISION;
         """
     )
+
+
+def metric_column(metric: str) -> str:
+    try:
+        return SENSOR_METRIC_COLUMNS[metric]
+    except KeyError as exc:
+        raise ValueError("Unsupported metric") from exc
+
+
+def aqi_level(value: float | None) -> str:
+    if value is None:
+        return "unknown"
+    if value <= 50:
+        return "good"
+    if value <= 100:
+        return "moderate"
+    if value <= 150:
+        return "unhealthy_sensitive"
+    return "unhealthy"
 
 
 def resolution_source(resolution: str) -> tuple[str, str]:
@@ -367,6 +392,113 @@ async def fetch_station_data(
         "meta": query_meta(resolution, effective_resolution, max_points, len(points), downsampled, resolution_note),
         "points": points,
     }
+
+
+async def fetch_analytics_series(
+    connection,
+    station_ids: list[int],
+    metric: str,
+    start_time: datetime,
+    end_time: datetime,
+    resolution: str,
+) -> list[dict]:
+    column = metric_column(metric)
+    table, bucket_column = resolution_source(resolution)
+    rows = await connection.fetch(
+        f"""
+        SELECT
+            data.{bucket_column} AS time,
+            s.id AS station_id,
+            s.code AS station_code,
+            s.name AS station_name,
+            data.{column} AS value
+        FROM {table} data
+        JOIN stations s ON s.id = data.station_id
+        WHERE data.station_id = ANY($1::bigint[])
+          AND data.{bucket_column} >= $2
+          AND data.{bucket_column} <= $3
+        ORDER BY data.{bucket_column}, s.code
+        """,
+        station_ids,
+        start_time,
+        end_time,
+    )
+    return [
+        {
+            **dict(row),
+            "metric": metric,
+            "aqi_level": aqi_level(row["value"]) if metric == "pm25" else None,
+        }
+        for row in rows
+    ]
+
+
+async def fetch_analytics_heatmap(
+    connection,
+    station_id: int,
+    metric: str,
+    start_time: datetime,
+    end_time: datetime,
+) -> list[dict]:
+    column = metric_column(metric)
+    rows = await connection.fetch(
+        f"""
+        SELECT
+            to_char(time_bucket('1 day', time), 'YYYY-MM-DD') AS day,
+            EXTRACT(hour FROM time)::int AS hour,
+            avg({column}) AS value
+        FROM sensor_data
+        WHERE station_id = $1
+          AND time >= $2
+          AND time <= $3
+        GROUP BY day, hour
+        ORDER BY day, hour
+        """,
+        station_id,
+        start_time,
+        end_time,
+    )
+    return [
+        {
+            **dict(row),
+            "level": aqi_level(row["value"]) if metric == "pm25" else None,
+        }
+        for row in rows
+    ]
+
+
+async def fetch_analytics_scatter(
+    connection,
+    station_id: int,
+    x_metric: str,
+    y_metric: str,
+    start_time: datetime,
+    end_time: datetime,
+    resolution: str,
+) -> list[dict]:
+    x_column = metric_column(x_metric)
+    y_column = metric_column(y_metric)
+    table, bucket_column = resolution_source(resolution)
+    rows = await connection.fetch(
+        f"""
+        SELECT
+            {bucket_column} AS time,
+            station_id,
+            {x_column} AS x,
+            {y_column} AS y
+        FROM {table}
+        WHERE station_id = $1
+          AND {bucket_column} >= $2
+          AND {bucket_column} <= $3
+          AND {x_column} IS NOT NULL
+          AND {y_column} IS NOT NULL
+        ORDER BY {bucket_column}
+        """,
+        station_id,
+        start_time,
+        end_time,
+    )
+    return [dict(row) for row in rows]
 
 
 async def fetch_live_stations(connection, user: dict) -> list[dict]:

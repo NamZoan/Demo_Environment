@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "re
 
 import { fetchBackendHealth, fetchCmsStations } from "./api.js";
 import AdminLayout from "./components/layout/AdminLayout.jsx";
+import AnalyticsReports from "./features/analytics/AnalyticsReports.jsx";
 import Dashboard from "./features/dashboard/Dashboard.jsx";
 import StationManager from "./features/stations/StationManager.jsx";
 import StationParameters from "./features/stations/StationParameters.jsx";
@@ -136,13 +137,14 @@ function AppShell() {
   const [stations, setStations] = useState(() => createMockStations());
   const [dataSource, setDataSource] = useState("mock");
   const [backendHealth, setBackendHealth] = useState({ ok: false, payload: {} });
+  const currentUser = useMemo(() => ({ id: 1 }), []);
 
   useEffect(() => {
     let cancelled = false;
     fetchBackendHealth().then((health) => {
       if (!cancelled) setBackendHealth(health);
     });
-    fetchCmsStations({ id: 1 }).then((result) => {
+    fetchCmsStations(currentUser).then((result) => {
       if (!cancelled && result.source === "backend" && result.stations.length > 0) {
         setStations(result.stations);
         setDataSource("backend");
@@ -151,7 +153,7 @@ function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [currentUser]);
 
   const visibleStations = useMemo(() => {
     const normalized = globalSearch.trim().toLowerCase();
@@ -208,7 +210,7 @@ function AppShell() {
           path="/stations"
         />
         <Route element={<StationDetailRoute stations={stations} />} path="/stations/:stationId" />
-        <Route element={<PlaceholderPage description="Tra cứu, biểu đồ và xuất dữ liệu quan trắc theo trạm, thông số và thời gian." title="Dữ liệu quan trắc" />} path="/data" />
+        <Route element={<AnalyticsReports currentUser={currentUser} stations={stations} />} path="/data" />
         <Route element={<PlaceholderPage description="Cấu hình ngưỡng, quy chuẩn, cấp cảnh báo và luồng xác nhận sự cố vượt QCVN." title="Cảnh báo QCVN" />} path="/alerts" />
         <Route element={<PlaceholderPage description="Hàng đợi kiểm duyệt dữ liệu tự động, loại bỏ bất thường và duyệt dữ liệu vào kho chính thức." title="Kiểm duyệt dữ liệu" />} path="/approval" />
         <Route element={<PlaceholderPage description="Theo dõi camera trạm, lịch lấy mẫu tự động và trạng thái lệnh điều khiển thiết bị." title="Camera & Lấy mẫu" />} path="/camera" />

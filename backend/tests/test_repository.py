@@ -5,12 +5,14 @@ import pytest
 
 from app.repository import (
     MAX_INTERACTIVE_POINTS_DEFAULT,
+    aqi_level,
     can_modify_station,
     choose_effective_resolution,
     downsample_interval_seconds,
     estimated_candidate_points,
     classify_station_status,
     fetch_station_data,
+    metric_column,
     query_meta,
     resolution_source,
     station_data_source,
@@ -36,6 +38,18 @@ def test_resolution_source_selects_hourly_aggregate():
 def test_resolution_source_rejects_unknown_resolution():
     with pytest.raises(ValueError, match="Unsupported resolution"):
         resolution_source("15m")
+
+
+def test_metric_column_rejects_unsafe_metrics():
+    assert metric_column("pm25") == "pm25"
+    with pytest.raises(ValueError, match="Unsupported metric"):
+        metric_column("pm25;drop table")
+
+
+def test_aqi_level_classifies_pm25_thresholds():
+    assert aqi_level(20) == "good"
+    assert aqi_level(80) == "moderate"
+    assert aqi_level(180) == "unhealthy"
 
 
 def test_choose_effective_resolution_keeps_one_minute_for_24_hours():
