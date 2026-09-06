@@ -142,7 +142,7 @@ export async function fetchAnalyticsScatter({ stationId, xMetric, yMetric, start
   return normalizeQueryEnvelope(await response.json());
 }
 
-function normalizeStation(row) {
+export function normalizeStation(row) {
   const metadata = row.metadata || {};
   const liveStatus = row.live_status || "offline";
   return {
@@ -157,6 +157,7 @@ function normalizeStation(row) {
     longitude: row.longitude,
     status: liveStatus === "offline" ? "offline" : row.status === "maintenance" ? "maintenance" : "online",
     lastSeenAt: row.last_seen_at || row.time,
+    qcvnThresholds: row.qcvn_thresholds || {},
     metrics: {
       temperature: row.temperature ?? 0,
       humidity: row.humidity ?? 0,

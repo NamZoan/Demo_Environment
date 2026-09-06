@@ -15,6 +15,7 @@ from app.repository import (
     fetch_analytics_heatmap,
     fetch_analytics_scatter,
     fetch_analytics_series,
+    fetch_live_stations,
     fetch_station_data,
     metric_column,
     query_meta,
@@ -523,6 +524,120 @@ def test_classify_station_status_marks_threshold_breach_warning():
     )
 
     assert status == "warning"
+
+
+def test_classify_station_status_uses_configured_min_and_max_thresholds():
+    now = datetime(2026, 9, 5, 8, 0, tzinfo=timezone.utc)
+    thresholds = {
+        "pm25": {"warning_max": 100.0, "critical_max": 120.0},
+        "temperature": {"warning_min": 5.0, "critical_min": 0.0},
+    }
+
+    assert (
+        classify_station_status(
+            pm25=80,
+            temperature=20,
+            humidity=70,
+            last_seen_at=now - timedelta(minutes=1),
+            now=now,
+            thresholds=thresholds,
+        )
+        == "online"
+    )
+    assert (
+        classify_station_status(
+            pm25=80,
+            temperature=-1,
+            humidity=70,
+            last_seen_at=now - timedelta(minutes=1),
+            now=now,
+            thresholds=thresholds,
+        )
+        == "critical"
+    )
+
+
+class FakeLiveStationsConnection:
+    def __init__(self, station_rows, config_rows):
+        self.station_rows = station_rows
+        self.config_rows = config_rows
+        self.fetch_calls = []
+
+    async def fetch(self, query, *args):
+        self.fetch_calls.append((query, args))
+        if "FROM alert_configs" in query:
+            return self.config_rows
+        return self.station_rows
+
+
+def test_fetch_live_stations_prefers_station_qcvn_config_over_region_config():
+    now = datetime.now(timezone.utc)
+    connection = FakeLiveStationsConnection(
+        station_rows=[
+            {
+                "id": 1,
+                "code": "A",
+                "name": "Station A",
+                "latitude": 10.0,
+                "longitude": 106.0,
+                "address": "A",
+                "station_status": "active",
+                "metadata": {},
+                "region_id": 10,
+                "last_seen_at": now - timedelta(minutes=1),
+                "time": now - timedelta(minutes=1),
+                "temperature": 25.0,
+                "humidity": 70.0,
+                "wind_speed": 2.0,
+                "pm25": 80.0,
+            },
+            {
+                "id": 2,
+                "code": "B",
+                "name": "Station B",
+                "latitude": 10.0,
+                "longitude": 106.0,
+                "address": "B",
+                "station_status": "active",
+                "metadata": {},
+                "region_id": 10,
+                "last_seen_at": now - timedelta(minutes=1),
+                "time": now - timedelta(minutes=1),
+                "temperature": 25.0,
+                "humidity": 70.0,
+                "wind_speed": 2.0,
+                "pm25": 70.0,
+            },
+        ],
+        config_rows=[
+            {
+                "station_id": None,
+                "region_id": 10,
+                "metric": "pm25",
+                "warning_min": None,
+                "warning_max": 60.0,
+                "critical_min": None,
+                "critical_max": 100.0,
+            },
+            {
+                "station_id": 1,
+                "region_id": None,
+                "metric": "pm25",
+                "warning_min": None,
+                "warning_max": 100.0,
+                "critical_min": None,
+                "critical_max": 120.0,
+            },
+        ],
+    )
+
+    stations = asyncio.run(fetch_live_stations(connection, {"roles": ["super_admin"], "region_ids": []}))
+
+    assert [query for query, _args in connection.fetch_calls if "FROM alert_configs" in query]
+    assert stations[0]["live_status"] == "online"
+    assert stations[0]["qcvn_thresholds"]["pm25"]["warning_max"] == 100.0
+    assert stations[1]["live_status"] == "warning"
+    assert stations[1]["qcvn_thresholds"]["pm25"]["warning_max"] == 60.0
 
 
 def test_manager_can_modify_station_only_inside_assigned_region():

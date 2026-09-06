@@ -45,6 +45,7 @@ class LiveStation(Station):
     humidity: float | None = None
     wind_speed: float | None = None
     pm25: float | None = None
+    qcvn_thresholds: dict[str, dict[str, float | None]] = Field(default_factory=dict)
     live_status: str
 
 

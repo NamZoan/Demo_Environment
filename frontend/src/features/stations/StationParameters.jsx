@@ -36,11 +36,11 @@ const rangeOptions = [
 ];
 
 const metricConfig = [
-  { key: "temperature", label: "Nhiệt độ", unit: "C", icon: Thermometer, warning: 38, critical: 42 },
-  { key: "humidity", label: "Độ ẩm", unit: "%", icon: Droplets, warning: 85, critical: 95 },
-  { key: "windSpeed", label: "Tốc độ gió", unit: "km/h", icon: Wind, warning: 35, critical: 50 },
-  { key: "pm25", label: "PM2.5", unit: "ug/m3", icon: Gauge, warning: 35, critical: 150 },
-  { key: "co", label: "CO", unit: "ppm", icon: Flame, warning: 5, critical: 10 },
+  { key: "temperature", thresholdKey: "temperature", label: "Nhiệt độ", unit: "C", icon: Thermometer, warning: 38, critical: 42 },
+  { key: "humidity", thresholdKey: "humidity", label: "Độ ẩm", unit: "%", icon: Droplets, warning: 85, critical: 95 },
+  { key: "windSpeed", thresholdKey: "wind_speed", label: "Tốc độ gió", unit: "km/h", icon: Wind, warning: 35, critical: 50 },
+  { key: "pm25", thresholdKey: "pm25", label: "PM2.5", unit: "ug/m3", icon: Gauge, warning: 35, critical: 150 },
+  { key: "co", thresholdKey: "co", label: "CO", unit: "ppm", icon: Flame, warning: 5, critical: 10 },
 ];
 
 const lineColors = {
@@ -108,9 +108,23 @@ function parseCsvPreview(content) {
   return { headers, rows };
 }
 
-function levelFor(value, metric) {
-  if (value >= metric.critical) return "critical";
-  if (value >= metric.warning) return "warning";
+function thresholdFor(station, metric) {
+  return station.qcvnThresholds?.[metric.thresholdKey] || {
+    warning_max: metric.warning,
+    critical_max: metric.critical,
+  };
+}
+
+function exceedsThreshold(value, threshold, level) {
+  const min = threshold[`${level}_min`];
+  const max = threshold[`${level}_max`];
+  return (min != null && value <= min) || (max != null && value >= max);
+}
+
+function levelFor(value, metric, station) {
+  const threshold = thresholdFor(station, metric);
+  if (exceedsThreshold(value, threshold, "critical")) return "critical";
+  if (exceedsThreshold(value, threshold, "warning")) return "warning";
   return "normal";
 }
 
@@ -270,7 +284,7 @@ export default function StationParameters({ onBack, station }) {
         {metricConfig.map((metric) => {
           const Icon = metric.icon;
           const value = station.metrics[metric.key];
-          const level = levelFor(value, metric);
+          const level = levelFor(value, metric, station);
           return (
             <article className={`rounded-lg border p-4 ${cardStyle(level)}`} key={metric.key}>
               <div className="flex items-center justify-between">

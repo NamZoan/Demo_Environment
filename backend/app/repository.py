@@ -7,6 +7,15 @@ from typing import Any
 STALE_AFTER = timedelta(minutes=30)
 WARNING_LIMITS = {"pm25": 35.0, "temperature": 38.0, "humidity": 85.0}
 CRITICAL_LIMITS = {"pm25": 150.0, "temperature": 42.0, "humidity": 95.0}
+DEFAULT_QCVN_THRESHOLDS = {
+    metric: {
+        "warning_min": None,
+        "warning_max": WARNING_LIMITS[metric],
+        "critical_min": None,
+        "critical_max": CRITICAL_LIMITS[metric],
+    }
+    for metric in WARNING_LIMITS
+}
 MAX_INTERACTIVE_POINTS_DEFAULT = 1000
 MIN_INTERACTIVE_POINTS = 100
 MAX_INTERACTIVE_POINTS = 5000
@@ -642,7 +651,56 @@ async def fetch_live_stations(connection, user: dict) -> list[dict]:
         *args,
     )
     now = datetime.now(timezone.utc)
-    return [_live_station_row(row, now) for row in rows]
+    thresholds = await fetch_live_station_qcvn_thresholds(connection, rows)
+    return [_live_station_row(row, now, thresholds.get(row["id"], DEFAULT_QCVN_THRESHOLDS)) for row in rows]
+
+
+async def fetch_live_station_qcvn_thresholds(connection, station_rows) -> dict[int, dict[str, dict[str, float | None]]]:
+    station_ids = [row["id"] for row in station_rows]
+    region_ids = sorted({row["region_id"] for row in station_rows if row["region_id"] is not None})
+    if not station_ids:
+        return {}
+
+    config_rows = await connection.fetch(
+        """
+        SELECT station_id, region_id, metric, warning_min, warning_max, critical_min, critical_max
+        FROM alert_configs
+        WHERE enabled = TRUE
+          AND metric = ANY($1::text[])
+          AND (
+              station_id = ANY($2::bigint[])
+              OR (station_id IS NULL AND region_id = ANY($3::bigint[]))
+          )
+        """,
+        list(SENSOR_METRIC_COLUMNS.keys()),
+        station_ids,
+        region_ids,
+    )
+    by_station: dict[int, dict[str, dict[str, float | None]]] = {}
+    by_region: dict[int, dict[str, dict[str, float | None]]] = {}
+    for row in config_rows:
+        threshold = qcvn_threshold_row(row)
+        if row["station_id"] is not None:
+            by_station.setdefault(row["station_id"], {})[row["metric"]] = threshold
+        elif row["region_id"] is not None:
+            by_region.setdefault(row["region_id"], {})[row["metric"]] = threshold
+
+    thresholds: dict[int, dict[str, dict[str, float | None]]] = {}
+    for row in station_rows:
+        station_thresholds = {metric: dict(threshold) for metric, threshold in DEFAULT_QCVN_THRESHOLDS.items()}
+        station_thresholds.update(by_region.get(row["region_id"], {}))
+        station_thresholds.update(by_station.get(row["id"], {}))
+        thresholds[row["id"]] = station_thresholds
+    return thresholds
+
+
+def qcvn_threshold_row(row) -> dict[str, float | None]:
+    return {
+        "warning_min": row["warning_min"],
+        "warning_max": row["warning_max"],
+        "critical_min": row["critical_min"],
+        "critical_max": row["critical_max"],
+    }
 
 
 async def fetch_overview(connection, user: dict) -> dict:
@@ -718,7 +776,9 @@ def classify_station_status(
     temperature: float | None,
     humidity: float | None,
     last_seen_at: datetime | None,
+    wind_speed: float | None = None,
     now: datetime | None = None,
+    thresholds: dict[str, dict[str, float | None]] | None = None,
 ) -> str:
     now = now or datetime.now(timezone.utc)
     if last_seen_at is None:
@@ -728,12 +788,21 @@ def classify_station_status(
     if now - last_seen_at > STALE_AFTER:
         return "offline"
 
-    values = {"pm25": pm25, "temperature": temperature, "humidity": humidity}
-    if any(value is not None and value >= CRITICAL_LIMITS[metric] for metric, value in values.items()):
+    values = {"pm25": pm25, "temperature": temperature, "humidity": humidity, "wind_speed": wind_speed}
+    thresholds = thresholds or DEFAULT_QCVN_THRESHOLDS
+    if any(is_threshold_breach(value, thresholds.get(metric), "critical") for metric, value in values.items()):
         return "critical"
-    if any(value is not None and value >= WARNING_LIMITS[metric] for metric, value in values.items()):
+    if any(is_threshold_breach(value, thresholds.get(metric), "warning") for metric, value in values.items()):
         return "warning"
     return "online"
+
+
+def is_threshold_breach(value: float | None, threshold: dict[str, float | None] | None, level: str) -> bool:
+    if value is None or threshold is None:
+        return False
+    min_value = threshold.get(f"{level}_min")
+    max_value = threshold.get(f"{level}_max")
+    return (min_value is not None and value <= min_value) or (max_value is not None and value >= max_value)
 
 
 def _station_row(row) -> dict:
@@ -743,14 +812,17 @@ def _station_row(row) -> dict:
     return item
 
 
-def _live_station_row(row, now: datetime) -> dict:
+def _live_station_row(row, now: datetime, thresholds: dict[str, dict[str, float | None]]) -> dict:
     item = _station_row(row)
     item["status"] = item.pop("station_status")
+    item["qcvn_thresholds"] = thresholds
     item["live_status"] = classify_station_status(
         pm25=item.get("pm25"),
         temperature=item.get("temperature"),
         humidity=item.get("humidity"),
+        wind_speed=item.get("wind_speed"),
         last_seen_at=item.get("last_seen_at") or item.get("time"),
         now=now,
+        thresholds=thresholds,
     )
     return item
