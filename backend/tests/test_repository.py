@@ -14,6 +14,7 @@ from app.repository import (
     query_meta,
     resolution_source,
     station_data_source,
+    station_downsample_source,
     validate_interactive_query_range,
 )
 
@@ -135,6 +136,14 @@ def test_station_data_source_selects_daily_continuous_aggregate():
     assert "valid_hours" in query
 
 
+def test_station_downsample_source_aligns_buckets_to_requested_start_time():
+    query, bucket_column = station_downsample_source("1m")
+
+    assert bucket_column == "bucket"
+    assert "extract(epoch from time) - extract(epoch from $2::timestamptz)" in query
+    assert "+ extract(epoch from $2::timestamptz)" in query
+
+
 class FakeStationDataConnection:
     def __init__(self, region_id, rows=None):
         self.region_id = region_id
@@ -219,7 +228,7 @@ def test_fetch_station_data_downsamples_when_candidate_count_exceeds_max_points(
     )
 
     query, args = connection.fetch_calls[0]
-    assert "floor(extract(epoch from time)" in query
+    assert "extract(epoch from time) - extract(epoch from $2::timestamptz)" in query
     assert args[3] == 900
     assert payload["meta"]["downsampled"] is True
     assert payload["meta"]["returned_points"] == 1

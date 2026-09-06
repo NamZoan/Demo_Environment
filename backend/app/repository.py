@@ -124,7 +124,10 @@ def station_downsample_source(resolution: str) -> tuple[str, str]:
     return (
         f"""
         SELECT
-            to_timestamp(floor(extract(epoch from {bucket_column}) / $4) * $4) AS bucket,
+            to_timestamp(
+                (floor((extract(epoch from {bucket_column}) - extract(epoch from $2::timestamptz)) / $4) * $4)
+                + extract(epoch from $2::timestamptz)
+            ) AS bucket,
             avg(temperature) AS temperature,
             avg(humidity) AS humidity,
             avg(wind_speed) AS wind_speed,
