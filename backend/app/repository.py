@@ -39,6 +39,67 @@ def resolution_source(resolution: str) -> tuple[str, str]:
         raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d") from exc
 
 
+def station_data_source(resolution: str) -> tuple[str, str]:
+    if resolution == "1m":
+        return (
+            """
+            SELECT
+                time,
+                temperature,
+                humidity,
+                wind_speed,
+                pm25,
+                NULL::bigint AS samples,
+                NULL::bigint AS valid_hours
+            FROM sensor_data
+            WHERE station_id = $1
+              AND time >= $2
+              AND time <= $3
+            ORDER BY time
+            """,
+            "time",
+        )
+    if resolution == "1h":
+        return (
+            """
+            SELECT
+                bucket,
+                temperature,
+                humidity,
+                wind_speed,
+                pm25,
+                samples,
+                NULL::bigint AS valid_hours
+            FROM sensor_data_hourly
+            WHERE station_id = $1
+              AND bucket >= $2
+              AND bucket <= $3
+            ORDER BY bucket
+            """,
+            "bucket",
+        )
+    if resolution == "1d":
+        return (
+            """
+            SELECT
+                bucket,
+                temperature,
+                humidity,
+                wind_speed,
+                pm25,
+                samples,
+                valid_hours
+            FROM sensor_data_daily
+            WHERE station_id = $1
+              AND bucket >= $2
+              AND bucket <= $3
+            ORDER BY bucket
+            """,
+            "bucket",
+        )
+    raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d")
+
+
 def validate_interactive_query_range(start_time: datetime, end_time: datetime, max_points: int) -> None:
     if start_time >= end_time:
         raise ValueError("start_time must be before end_time")
@@ -237,30 +298,22 @@ async def fetch_station_data(
     start_time: datetime,
     end_time: datetime,
     resolution: str,
-) -> list[dict]:
-    table, bucket_column = resolution_source(resolution)
-    samples_expression = "samples" if resolution != "1m" else "NULL::bigint AS samples"
-    wind_speed_expression = "wind_speed" if resolution == "1m" else "NULL::double precision AS wind_speed"
-    rows = await connection.fetch(
-        f"""
-        SELECT
-            {bucket_column} AS time,
-            temperature,
-            humidity,
-            {wind_speed_expression},
-            pm25,
-            {samples_expression}
-        FROM {table}
-        WHERE station_id = $1
-          AND {bucket_column} >= $2
-          AND {bucket_column} <= $3
-        ORDER BY {bucket_column}
-        """,
-        station_id,
-        start_time,
-        end_time,
-    )
-    return [dict(row) for row in rows]
+    user: dict,
+    max_points: int = MAX_INTERACTIVE_POINTS_DEFAULT,
+) -> dict:
+    validate_interactive_query_range(start_time, end_time, max_points)
+    station_region_id = await resolve_station_region_id(connection, station_id)
+    if not can_read_station(user, station_region_id):
+        raise PermissionError("Station is outside assigned regions")
+
+    effective_resolution, resolution_note = choose_effective_resolution(resolution, start_time, end_time)
+    query, bucket_column = station_data_source(effective_resolution)
+    rows = await connection.fetch(query, station_id, start_time, end_time)
+    points = [{**dict(row), "time": row[bucket_column]} for row in rows]
+    return {
+        "meta": query_meta(resolution, effective_resolution, max_points, len(points), False, resolution_note),
+        "points": points,
+    }
 
 
 async def fetch_live_stations(connection, user: dict) -> list[dict]:
@@ -336,6 +389,25 @@ def can_modify_station(user: dict, station_region_id: int | None) -> bool:
     if "manager" not in roles:
         return False
     return station_region_id in set(user.get("region_ids", []))
+
+
+def can_read_station(user: dict, station_region_id: int | None) -> bool:
+    if "super_admin" in user.get("roles", []):
+        return True
+    return station_region_id in set(user.get("region_ids", []))
+
+
+async def resolve_station_region_id(connection, station_id: int) -> int | None:
+    row = await connection.fetchrow(
+        """
+        SELECT region_id FROM stations
+        WHERE id = $1
+        """,
+        station_id,
+    )
+    if row is None:
+        raise LookupError("Station not found")
+    return row["region_id"]
 
 
 def classify_station_status(

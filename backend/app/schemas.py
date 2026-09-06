@@ -57,6 +57,41 @@ class SensorPoint(BaseModel):
     samples: int | None = None
 
 
+class AnalyticsPoint(BaseModel):
+    station_id: int
+    time: datetime
+    value: float | None
+
+
+class ScatterPoint(BaseModel):
+    x: float | None
+    y: float | None
+
+
+class QueryMeta(BaseModel):
+    requested_resolution: str
+    effective_resolution: str
+    max_points: int
+    returned_points: int
+    downsampled: bool
+    resolution_note: str | None = None
+
+
+class StationDataResponse(BaseModel):
+    meta: QueryMeta
+    points: list[SensorPoint]
+
+
+class AnalyticsSeriesResponse(BaseModel):
+    meta: QueryMeta
+    points: list[AnalyticsPoint]
+
+
+class AnalyticsScatterResponse(BaseModel):
+    meta: QueryMeta
+    points: list[ScatterPoint]
+
+
 class LoginRequest(BaseModel):
     username: str
     password: str

@@ -1,14 +1,17 @@
-import pytest
-
+import asyncio
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from app.repository import (
     MAX_INTERACTIVE_POINTS_DEFAULT,
     can_modify_station,
     choose_effective_resolution,
     classify_station_status,
+    fetch_station_data,
     query_meta,
     resolution_source,
+    station_data_source,
     validate_interactive_query_range,
 )
 
@@ -99,6 +102,78 @@ def test_query_meta_includes_required_fields():
         "downsampled": False,
         "resolution_note": "Switched from 1m to 1h because the selected range is longer than 48 hours.",
     }
+
+
+def test_station_data_source_selects_hourly_continuous_aggregate():
+    query, bucket_column = station_data_source("1h")
+
+    assert bucket_column == "bucket"
+    assert "FROM sensor_data_hourly" in query
+    assert "time_bucket('1 hour', time)" not in query
+    assert "valid_hours" in query
+
+
+def test_station_data_source_selects_daily_continuous_aggregate():
+    query, bucket_column = station_data_source("1d")
+
+    assert bucket_column == "bucket"
+    assert "FROM sensor_data_daily" in query
+    assert "time_bucket('1 day'" not in query
+    assert "valid_hours" in query
+
+
+class FakeStationDataConnection:
+    def __init__(self, region_id, rows=None):
+        self.region_id = region_id
+        self.rows = rows or []
+        self.fetch_calls = []
+
+    async def fetchrow(self, query, *args):
+        if "SELECT region_id FROM stations" in query:
+            return {"region_id": self.region_id}
+        return None
+
+    async def fetch(self, query, *args):
+        self.fetch_calls.append((query, args))
+        return self.rows
+
+
+def test_fetch_station_data_returns_meta_and_points_envelope():
+    row_time = datetime(2026, 9, 5, 0, 0, tzinfo=timezone.utc)
+    connection = FakeStationDataConnection(
+        region_id=20,
+        rows=[
+            {
+                "time": row_time,
+                "temperature": 30.5,
+                "humidity": 72.0,
+                "wind_speed": 2.1,
+                "pm25": 41.2,
+                "samples": None,
+                "valid_hours": None,
+            }
+        ],
+    )
+    user = {"roles": ["super_admin"], "region_ids": []}
+
+    payload = asyncio.run(
+        fetch_station_data(
+            connection,
+            station_id=100,
+            start_time=row_time,
+            end_time=row_time + timedelta(hours=1),
+            resolution="1m",
+            user=user,
+            max_points=1000,
+        )
+    )
+
+    assert payload["meta"]["requested_resolution"] == "1m"
+    assert payload["meta"]["effective_resolution"] == "1m"
+    assert payload["meta"]["returned_points"] == 1
+    assert payload["meta"]["downsampled"] is False
+    assert payload["points"][0]["time"] == row_time
+    assert payload["points"][0]["pm25"] == 41.2
 
 
 def test_classify_station_status_marks_stale_station_offline():

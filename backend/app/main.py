@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+from typing import Annotated
 
 import asyncpg
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
@@ -9,6 +10,7 @@ from app.config import settings
 from app.db import database
 from app.ftp_browser import FtpConnectionSettings, check_ftp_status, list_ftp_directory, read_ftp_csv_file
 from app.repository import (
+    MAX_INTERACTIVE_POINTS_DEFAULT,
     authenticate_user,
     create_station,
     delete_station,
@@ -28,9 +30,9 @@ from app.schemas import (
     FtpFilePreview,
     FtpListing,
     FtpStatus,
-    SensorPoint,
     Station,
     StationCreate,
+    StationDataResponse,
     StationUpdate,
 )
 
@@ -178,22 +180,29 @@ async def login(payload: LoginRequest) -> dict:
     return user
 
 
-@app.get("/api/stations/{station_id}/data", response_model=list[SensorPoint])
+@app.get("/api/stations/{station_id}/data", response_model=StationDataResponse)
 async def station_data(
     station_id: int,
-    start_time: datetime = Query(...),
-    end_time: datetime = Query(...),
+    start_time: Annotated[datetime, Query()],
+    end_time: Annotated[datetime, Query()],
     resolution: str = Query("1m", pattern="^(1m|1h|1d)$"),
-) -> list[dict]:
+    max_points: int = Query(MAX_INTERACTIVE_POINTS_DEFAULT),
+    user: dict = Depends(current_user),
+) -> dict:
     if start_time.tzinfo is None:
         start_time = start_time.replace(tzinfo=timezone.utc)
     if end_time.tzinfo is None:
         end_time = end_time.replace(tzinfo=timezone.utc)
-    if start_time > end_time:
-        raise HTTPException(status_code=400, detail="start_time must be before end_time")
 
     async with database.acquire() as connection:
-        return await fetch_station_data(connection, station_id, start_time, end_time, resolution)
+        try:
+            return await fetch_station_data(connection, station_id, start_time, end_time, resolution, user, max_points)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.websocket("/ws/live")
