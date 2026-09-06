@@ -27,6 +27,7 @@ import {
 
 import { createMockSeries } from "../../services/mockApi.js";
 import { fetchFtpFile, fetchFtpFiles, fetchFtpStatus, fetchStationData } from "../../api.js";
+import { queryOptimizationNote, stationResolutionOptions } from "./stationTimeRange.js";
 
 const rangeOptions = [
   { value: "day", label: "Ngày" },
@@ -56,17 +57,17 @@ const rangeConfig = {
   month: { hours: 24 * 30, resolution: "1d" },
 };
 
-function chartTimeLabel(value, range) {
+function chartTimeLabel(value, resolution) {
   const date = new Date(value);
-  if (range === "day") {
+  if (resolution === "1m") {
     return date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
   }
   return date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" });
 }
 
-function normalizeSeries(points, range) {
+function normalizeSeries(points, resolution) {
   return points.map((point) => ({
-    time: chartTimeLabel(point.time, range),
+    time: chartTimeLabel(point.time, resolution),
     temperature: point.temperature,
     humidity: point.humidity,
     windSpeed: point.wind_speed,
@@ -122,6 +123,7 @@ function cardStyle(level) {
 export default function StationParameters({ onBack, station }) {
   const [range, setRange] = useState("day");
   const [backendSeries, setBackendSeries] = useState([]);
+  const [queryMeta, setQueryMeta] = useState(null);
   const [dataSource, setDataSource] = useState("mock");
   const [ftpStatus, setFtpStatus] = useState(null);
   const [ftpPath, setFtpPath] = useState(() => defaultFtpPath(station));
@@ -132,6 +134,12 @@ export default function StationParameters({ onBack, station }) {
   const [csvLoading, setCsvLoading] = useState(false);
   const mockSeries = useMemo(() => createMockSeries(station.id, range), [range, station.id]);
   const series = backendSeries.length > 0 ? backendSeries : mockSeries;
+  const selectedRange = rangeConfig[range];
+  const optimizationNote = queryOptimizationNote(queryMeta);
+  const effectiveResolution = queryMeta?.effective_resolution || selectedRange.resolution;
+  const effectiveResolutionOption =
+    stationResolutionOptions.find((item) => item.value === effectiveResolution) ||
+    stationResolutionOptions.find((item) => item.value === selectedRange.resolution);
   const parsedCsv = useMemo(() => parseCsvPreview(csvPreview?.content || ""), [csvPreview]);
   const stationDetails = [
     { label: "Mã trạm", value: station.code },
@@ -142,12 +150,12 @@ export default function StationParameters({ onBack, station }) {
     { label: "Lần nhận dữ liệu cuối", value: formatDateTime(station.lastSeenAt) },
     { label: "Tọa độ", value: `${station.latitude}, ${station.longitude}` },
     { label: "Nguồn", value: station.code.startsWith("sensor_") ? "IoT simulator qua FTP" : "Database seed/API" },
+    { label: "Độ phân giải biểu đồ", value: effectiveResolutionOption?.label },
   ];
 
   useEffect(() => {
     let cancelled = false;
     const now = new Date();
-    const selectedRange = rangeConfig[range];
     const start = new Date(now.getTime() - selectedRange.hours * 60 * 60 * 1000);
 
     fetchStationData({
@@ -156,12 +164,20 @@ export default function StationParameters({ onBack, station }) {
       endTime: now,
       resolution: selectedRange.resolution,
       currentUser: { id: 1 },
-    }).then((points) => {
-      if (cancelled) return;
-      const normalized = normalizeSeries(points, range);
-      setBackendSeries(normalized);
-      setDataSource(normalized.length > 0 ? "backend" : "mock");
-    });
+    })
+      .then((payload) => {
+        if (cancelled) return;
+        const normalized = normalizeSeries(payload.points, payload.meta?.effective_resolution || selectedRange.resolution);
+        setQueryMeta(payload.meta);
+        setBackendSeries(normalized);
+        setDataSource(normalized.length > 0 ? "backend" : "mock");
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setQueryMeta(null);
+        setBackendSeries([]);
+        setDataSource("mock");
+      });
 
     return () => {
       cancelled = true;
@@ -265,6 +281,10 @@ export default function StationParameters({ onBack, station }) {
           );
         })}
       </div>
+
+      {optimizationNote && (
+        <p className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-800">{optimizationNote}</p>
+      )}
 
       <div className="grid gap-4 xl:grid-cols-[.8fr_1.2fr]">
         <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -427,7 +447,7 @@ export default function StationParameters({ onBack, station }) {
             <h2 className="text-lg font-semibold">Biểu đồ biến thiên thông số</h2>
             <p className="text-sm text-slate-500">
               Dữ liệu {dataSource === "backend" ? "từ Backend API + TimescaleDB" : "mock fallback"} theo{" "}
-              {rangeOptions.find((item) => item.value === range)?.label.toLowerCase()}.
+              {effectiveResolutionOption?.label.toLowerCase()}.
             </p>
           </div>
         </div>

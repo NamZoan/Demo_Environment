@@ -15,6 +15,7 @@ import {
 } from "recharts";
 
 import { fetchAnalyticsHeatmap, fetchAnalyticsScatter, fetchAnalyticsSeries } from "../../api.js";
+import { queryOptimizationNote } from "../stations/stationTimeRange.js";
 import { resolveSelectedStationIds } from "./analyticsSelection.js";
 
 const metrics = [
@@ -55,8 +56,10 @@ export default function AnalyticsReports({ currentUser, stations }) {
   const [metric, setMetric] = useState("pm25");
   const [range, setRange] = useState("week");
   const [series, setSeries] = useState([]);
+  const [seriesMeta, setSeriesMeta] = useState(null);
   const [heatmap, setHeatmap] = useState([]);
   const [scatter, setScatter] = useState([]);
+  const [scatterMeta, setScatterMeta] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const selectedStations = useMemo(
@@ -66,6 +69,7 @@ export default function AnalyticsReports({ currentUser, stations }) {
   const startTime = useMemo(() => startForRange(range), [range]);
   const endTime = useMemo(() => new Date(), [range]);
   const rows = useMemo(() => chartRows(series), [series]);
+  const analyticsOptimizationNote = queryOptimizationNote(seriesMeta) || queryOptimizationNote(scatterMeta);
 
   useEffect(() => {
     setSelectedStationIds((current) => resolveSelectedStationIds(stations, current));
@@ -97,9 +101,11 @@ export default function AnalyticsReports({ currentUser, stations }) {
           currentUser,
         }),
       ]);
-      setSeries(seriesPayload);
+      setSeries(seriesPayload.points);
       setHeatmap(heatmapPayload);
-      setScatter(scatterPayload);
+      setScatter(scatterPayload.points);
+      setSeriesMeta(seriesPayload.meta);
+      setScatterMeta(scatterPayload.meta);
     } finally {
       setLoading(false);
     }
@@ -166,6 +172,10 @@ export default function AnalyticsReports({ currentUser, stations }) {
           </button>
         </div>
       </section>
+
+      {analyticsOptimizationNote && (
+        <p className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-800">{analyticsOptimizationNote}</p>
+      )}
 
       <section className="rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-lg font-semibold">Biến động theo thời gian</h2>
