@@ -163,6 +163,8 @@ async def analytics_series(
             )
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -180,6 +182,8 @@ async def analytics_heatmap(
             return await fetch_analytics_heatmap(connection, station_id, metric, start_time, end_time, user)
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -210,6 +214,8 @@ async def analytics_scatter(
             )
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
