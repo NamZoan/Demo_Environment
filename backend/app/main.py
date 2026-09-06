@@ -26,13 +26,13 @@ from app.repository import (
     update_station,
 )
 from app.schemas import (
-    AnalyticsPoint,
+    AnalyticsScatterResponse,
+    AnalyticsSeriesResponse,
     HeatmapPoint,
     LiveStation,
     LoginRequest,
     LoginResponse,
     Overview,
-    ScatterPoint,
     FtpFilePreview,
     FtpListing,
     FtpStatus,
@@ -139,18 +139,19 @@ async def overview(user: dict = Depends(current_user)) -> dict:
         return await fetch_overview(connection, user)
 
 
-@app.get("/api/analytics/series", response_model=list[AnalyticsPoint])
+@app.get("/api/analytics/series", response_model=AnalyticsSeriesResponse)
 async def analytics_series(
-    station_ids: str = Query(...),
+    station_ids: Annotated[str, Query()],
+    start_time: Annotated[datetime, Query()],
+    end_time: Annotated[datetime, Query()],
     metric: str = Query("pm25"),
-    start_time: datetime = Query(...),
-    end_time: datetime = Query(...),
     resolution: str = Query("1h", pattern="^(1m|1h|1d)$"),
+    max_points: int = Query(MAX_INTERACTIVE_POINTS_DEFAULT),
     user: dict = Depends(current_user),
-) -> list[dict]:
+) -> dict:
     async with database.acquire() as connection:
         try:
-            return await fetch_analytics_series(connection, parse_id_list(station_ids), metric, start_time, end_time, resolution)
+            return await fetch_analytics_series(connection, parse_id_list(station_ids), metric, start_time, end_time, resolution, max_points)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -170,19 +171,20 @@ async def analytics_heatmap(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/api/analytics/scatter", response_model=list[ScatterPoint])
+@app.get("/api/analytics/scatter", response_model=AnalyticsScatterResponse)
 async def analytics_scatter(
     station_id: int,
+    start_time: Annotated[datetime, Query()],
+    end_time: Annotated[datetime, Query()],
     x_metric: str = Query("temperature"),
     y_metric: str = Query("pm25"),
-    start_time: datetime = Query(...),
-    end_time: datetime = Query(...),
     resolution: str = Query("1h", pattern="^(1m|1h|1d)$"),
+    max_points: int = Query(MAX_INTERACTIVE_POINTS_DEFAULT),
     user: dict = Depends(current_user),
-) -> list[dict]:
+) -> dict:
     async with database.acquire() as connection:
         try:
-            return await fetch_analytics_scatter(connection, station_id, x_metric, y_metric, start_time, end_time, resolution)
+            return await fetch_analytics_scatter(connection, station_id, x_metric, y_metric, start_time, end_time, resolution, max_points)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

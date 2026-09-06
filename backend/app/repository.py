@@ -401,29 +401,61 @@ async def fetch_analytics_series(
     start_time: datetime,
     end_time: datetime,
     resolution: str,
-) -> list[dict]:
+    max_points: int = MAX_INTERACTIVE_POINTS_DEFAULT,
+) -> dict:
+    validate_interactive_query_range(start_time, end_time, max_points)
     column = metric_column(metric)
-    table, bucket_column = resolution_source(resolution)
-    rows = await connection.fetch(
-        f"""
-        SELECT
-            data.{bucket_column} AS time,
-            s.id AS station_id,
-            s.code AS station_code,
-            s.name AS station_name,
-            data.{column} AS value
-        FROM {table} data
-        JOIN stations s ON s.id = data.station_id
-        WHERE data.station_id = ANY($1::bigint[])
-          AND data.{bucket_column} >= $2
-          AND data.{bucket_column} <= $3
-        ORDER BY data.{bucket_column}, s.code
-        """,
-        station_ids,
-        start_time,
-        end_time,
-    )
-    return [
+    effective_resolution, resolution_note = choose_effective_resolution(resolution, start_time, end_time)
+    table, bucket_column = resolution_source(effective_resolution)
+    candidate_points = estimated_candidate_points(start_time, end_time, effective_resolution)
+    downsampled = candidate_points > max_points
+    if downsampled:
+        interval_seconds = downsample_interval_seconds(candidate_points, max_points, effective_resolution)
+        rows = await connection.fetch(
+            f"""
+            SELECT
+                to_timestamp(
+                    (floor((extract(epoch from data.{bucket_column}) - extract(epoch from $2::timestamptz)) / $4) * $4)
+                    + extract(epoch from $2::timestamptz)
+                ) AS time,
+                s.id AS station_id,
+                s.code AS station_code,
+                s.name AS station_name,
+                avg(data.{column}) AS value
+            FROM {table} data
+            JOIN stations s ON s.id = data.station_id
+            WHERE data.station_id = ANY($1::bigint[])
+              AND data.{bucket_column} >= $2
+              AND data.{bucket_column} <= $3
+            GROUP BY time, s.id, s.code, s.name
+            ORDER BY time, s.code
+            """,
+            station_ids,
+            start_time,
+            end_time,
+            interval_seconds,
+        )
+    else:
+        rows = await connection.fetch(
+            f"""
+            SELECT
+                data.{bucket_column} AS time,
+                s.id AS station_id,
+                s.code AS station_code,
+                s.name AS station_name,
+                data.{column} AS value
+            FROM {table} data
+            JOIN stations s ON s.id = data.station_id
+            WHERE data.station_id = ANY($1::bigint[])
+              AND data.{bucket_column} >= $2
+              AND data.{bucket_column} <= $3
+            ORDER BY data.{bucket_column}, s.code
+            """,
+            station_ids,
+            start_time,
+            end_time,
+        )
+    points = [
         {
             **dict(row),
             "metric": metric,
@@ -431,6 +463,10 @@ async def fetch_analytics_series(
         }
         for row in rows
     ]
+    return {
+        "meta": query_meta(resolution, effective_resolution, max_points, len(points), downsampled, resolution_note),
+        "points": points,
+    }
 
 
 async def fetch_analytics_heatmap(
@@ -475,30 +511,66 @@ async def fetch_analytics_scatter(
     start_time: datetime,
     end_time: datetime,
     resolution: str,
-) -> list[dict]:
+    max_points: int = MAX_INTERACTIVE_POINTS_DEFAULT,
+) -> dict:
+    validate_interactive_query_range(start_time, end_time, max_points)
     x_column = metric_column(x_metric)
     y_column = metric_column(y_metric)
-    table, bucket_column = resolution_source(resolution)
-    rows = await connection.fetch(
-        f"""
-        SELECT
-            {bucket_column} AS time,
+    effective_resolution, resolution_note = choose_effective_resolution(resolution, start_time, end_time)
+    table, bucket_column = resolution_source(effective_resolution)
+    candidate_points = estimated_candidate_points(start_time, end_time, effective_resolution)
+    downsampled = candidate_points > max_points
+    if downsampled:
+        interval_seconds = downsample_interval_seconds(candidate_points, max_points, effective_resolution)
+        rows = await connection.fetch(
+            f"""
+            SELECT
+                to_timestamp(
+                    (floor((extract(epoch from {bucket_column}) - extract(epoch from $2::timestamptz)) / $4) * $4)
+                    + extract(epoch from $2::timestamptz)
+                ) AS time,
+                station_id,
+                avg({x_column}) AS x,
+                avg({y_column}) AS y
+            FROM {table}
+            WHERE station_id = $1
+              AND {bucket_column} >= $2
+              AND {bucket_column} <= $3
+              AND {x_column} IS NOT NULL
+              AND {y_column} IS NOT NULL
+            GROUP BY time, station_id
+            ORDER BY time
+            """,
             station_id,
-            {x_column} AS x,
-            {y_column} AS y
-        FROM {table}
-        WHERE station_id = $1
-          AND {bucket_column} >= $2
-          AND {bucket_column} <= $3
-          AND {x_column} IS NOT NULL
-          AND {y_column} IS NOT NULL
-        ORDER BY {bucket_column}
-        """,
-        station_id,
-        start_time,
-        end_time,
-    )
-    return [dict(row) for row in rows]
+            start_time,
+            end_time,
+            interval_seconds,
+        )
+    else:
+        rows = await connection.fetch(
+            f"""
+            SELECT
+                {bucket_column} AS time,
+                station_id,
+                {x_column} AS x,
+                {y_column} AS y
+            FROM {table}
+            WHERE station_id = $1
+              AND {bucket_column} >= $2
+              AND {bucket_column} <= $3
+              AND {x_column} IS NOT NULL
+              AND {y_column} IS NOT NULL
+            ORDER BY {bucket_column}
+            """,
+            station_id,
+            start_time,
+            end_time,
+        )
+    points = [dict(row) for row in rows]
+    return {
+        "meta": query_meta(resolution, effective_resolution, max_points, len(points), downsampled, resolution_note),
+        "points": points,
+    }
 
 
 async def fetch_live_stations(connection, user: dict) -> list[dict]:

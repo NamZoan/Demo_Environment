@@ -8,9 +8,11 @@ from app.repository import (
     aqi_level,
     can_modify_station,
     choose_effective_resolution,
+    classify_station_status,
     downsample_interval_seconds,
     estimated_candidate_points,
-    classify_station_status,
+    fetch_analytics_scatter,
+    fetch_analytics_series,
     fetch_station_data,
     metric_column,
     query_meta,
@@ -174,6 +176,16 @@ class FakeStationDataConnection:
         return self.rows
 
 
+class FakeAnalyticsConnection:
+    def __init__(self, rows):
+        self.rows = rows
+        self.fetch_calls = []
+
+    async def fetch(self, query, *args):
+        self.fetch_calls.append((query, args))
+        return self.rows
+
+
 def test_fetch_station_data_returns_meta_and_points_envelope():
     row_time = datetime(2026, 9, 5, 0, 0, tzinfo=timezone.utc)
     connection = FakeStationDataConnection(
@@ -247,6 +259,65 @@ def test_fetch_station_data_downsamples_when_candidate_count_exceeds_max_points(
     assert payload["meta"]["downsampled"] is True
     assert payload["meta"]["returned_points"] == 1
     assert payload["meta"]["resolution_note"] == "Returned 100 representative points from 1441 available points."
+
+
+def test_fetch_analytics_series_returns_envelope_and_uses_effective_resolution():
+    row_time = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    connection = FakeAnalyticsConnection(
+        [
+            {
+                "time": row_time,
+                "station_id": 1,
+                "station_code": "AQ-001",
+                "station_name": "Station 1",
+                "value": 42.0,
+            }
+        ]
+    )
+
+    payload = asyncio.run(
+        fetch_analytics_series(
+            connection,
+            station_ids=[1],
+            metric="pm25",
+            start_time=row_time,
+            end_time=row_time + timedelta(days=7),
+            resolution="1m",
+            max_points=1000,
+        )
+    )
+
+    query, _args = connection.fetch_calls[0]
+    assert "FROM sensor_data_hourly data" in query
+    assert payload["meta"]["requested_resolution"] == "1m"
+    assert payload["meta"]["effective_resolution"] == "1h"
+    assert payload["points"][0]["aqi_level"] is not None
+
+
+def test_fetch_analytics_scatter_returns_envelope_and_downsamples_pairs():
+    row_time = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    connection = FakeAnalyticsConnection([{"time": row_time, "station_id": 1, "x": 30.0, "y": 42.0}])
+
+    payload = asyncio.run(
+        fetch_analytics_scatter(
+            connection,
+            station_id=1,
+            x_metric="temperature",
+            y_metric="pm25",
+            start_time=row_time,
+            end_time=row_time + timedelta(hours=24),
+            resolution="1m",
+            max_points=100,
+        )
+    )
+
+    query, args = connection.fetch_calls[0]
+    assert "avg(temperature) AS x" in query
+    assert "avg(pm25) AS y" in query
+    assert args[3] == 900
+    assert payload["meta"]["downsampled"] is True
+    assert payload["points"][0]["x"] == 30.0
+    assert payload["points"][0]["y"] == 42.0
 
 
 def test_classify_station_status_marks_stale_station_offline():
