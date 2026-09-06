@@ -137,12 +137,33 @@ def downsample_interval_seconds(candidate_points: int, max_points: int, resoluti
 
 def station_downsample_source(resolution: str) -> tuple[str, str]:
     table, bucket_column = resolution_source(resolution)
+    metric_expressions = {
+        "1m": {
+            "temperature": "avg(temperature) AS temperature",
+            "humidity": "avg(humidity) AS humidity",
+            "wind_speed": "avg(wind_speed) AS wind_speed",
+            "pm25": "avg(pm25) AS pm25",
+        },
+        "1h": {
+            "temperature": "sum(temperature * samples) / nullif(sum(samples), 0) AS temperature",
+            "humidity": "sum(humidity * samples) / nullif(sum(samples), 0) AS humidity",
+            "wind_speed": "sum(wind_speed * samples) / nullif(sum(samples), 0) AS wind_speed",
+            "pm25": "sum(pm25 * samples) / nullif(sum(samples), 0) AS pm25",
+        },
+        "1d": {
+            "temperature": "sum(temperature * samples) / nullif(sum(samples), 0) AS temperature",
+            "humidity": "sum(humidity * samples) / nullif(sum(samples), 0) AS humidity",
+            "wind_speed": "sum(wind_speed * samples) / nullif(sum(samples), 0) AS wind_speed",
+            "pm25": "sum(pm25 * samples) / nullif(sum(samples), 0) AS pm25",
+        },
+    }
     sample_expressions = {
         "1m": ("count(*)::bigint AS samples", "NULL::bigint AS valid_hours"),
         "1h": ("sum(samples)::bigint AS samples", "NULL::bigint AS valid_hours"),
         "1d": ("sum(samples)::bigint AS samples", "sum(valid_hours)::bigint AS valid_hours"),
     }
     try:
+        metrics = metric_expressions[resolution]
         samples_expression, valid_hours_expression = sample_expressions[resolution]
     except KeyError as exc:
         raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d") from exc
@@ -153,10 +174,10 @@ def station_downsample_source(resolution: str) -> tuple[str, str]:
                 (floor((extract(epoch from {bucket_column}) - extract(epoch from $2::timestamptz)) / $4) * $4)
                 + extract(epoch from $2::timestamptz)
             ) AS bucket,
-            avg(temperature) AS temperature,
-            avg(humidity) AS humidity,
-            avg(wind_speed) AS wind_speed,
-            avg(pm25) AS pm25,
+            {metrics["temperature"]},
+            {metrics["humidity"]},
+            {metrics["wind_speed"]},
+            {metrics["pm25"]},
             {samples_expression},
             {valid_hours_expression}
         FROM {table}
@@ -401,9 +422,14 @@ async def fetch_analytics_series(
     start_time: datetime,
     end_time: datetime,
     resolution: str,
+    user: dict,
     max_points: int = MAX_INTERACTIVE_POINTS_DEFAULT,
 ) -> dict:
     validate_interactive_query_range(start_time, end_time, max_points)
+    for station_id in station_ids:
+        station_region_id = await resolve_station_region_id(connection, station_id)
+        if not can_read_station(user, station_region_id):
+            raise PermissionError("Station is outside assigned regions")
     column = metric_column(metric)
     effective_resolution, resolution_note = choose_effective_resolution(resolution, start_time, end_time)
     table, bucket_column = resolution_source(effective_resolution)
@@ -411,6 +437,7 @@ async def fetch_analytics_series(
     downsampled = candidate_points > max_points
     if downsampled:
         interval_seconds = downsample_interval_seconds(candidate_points, max_points, effective_resolution)
+        value_expression = analytics_average_expression(f"data.{column}", effective_resolution, "value", sample_column="data.samples")
         rows = await connection.fetch(
             f"""
             SELECT
@@ -421,7 +448,7 @@ async def fetch_analytics_series(
                 s.id AS station_id,
                 s.code AS station_code,
                 s.name AS station_name,
-                avg(data.{column}) AS value
+                {value_expression}
             FROM {table} data
             JOIN stations s ON s.id = data.station_id
             WHERE data.station_id = ANY($1::bigint[])
@@ -475,7 +502,11 @@ async def fetch_analytics_heatmap(
     metric: str,
     start_time: datetime,
     end_time: datetime,
+    user: dict,
 ) -> list[dict]:
+    station_region_id = await resolve_station_region_id(connection, station_id)
+    if not can_read_station(user, station_region_id):
+        raise PermissionError("Station is outside assigned regions")
     column = metric_column(metric)
     rows = await connection.fetch(
         f"""
@@ -511,9 +542,13 @@ async def fetch_analytics_scatter(
     start_time: datetime,
     end_time: datetime,
     resolution: str,
+    user: dict,
     max_points: int = MAX_INTERACTIVE_POINTS_DEFAULT,
 ) -> dict:
     validate_interactive_query_range(start_time, end_time, max_points)
+    station_region_id = await resolve_station_region_id(connection, station_id)
+    if not can_read_station(user, station_region_id):
+        raise PermissionError("Station is outside assigned regions")
     x_column = metric_column(x_metric)
     y_column = metric_column(y_metric)
     effective_resolution, resolution_note = choose_effective_resolution(resolution, start_time, end_time)
@@ -522,6 +557,8 @@ async def fetch_analytics_scatter(
     downsampled = candidate_points > max_points
     if downsampled:
         interval_seconds = downsample_interval_seconds(candidate_points, max_points, effective_resolution)
+        x_expression = analytics_average_expression(x_column, effective_resolution, "x")
+        y_expression = analytics_average_expression(y_column, effective_resolution, "y")
         rows = await connection.fetch(
             f"""
             SELECT
@@ -530,8 +567,8 @@ async def fetch_analytics_scatter(
                     + extract(epoch from $2::timestamptz)
                 ) AS time,
                 station_id,
-                avg({x_column}) AS x,
-                avg({y_column}) AS y
+                {x_expression},
+                {y_expression}
             FROM {table}
             WHERE station_id = $1
               AND {bucket_column} >= $2
@@ -652,6 +689,14 @@ def can_read_station(user: dict, station_region_id: int | None) -> bool:
     if "super_admin" in user.get("roles", []):
         return True
     return station_region_id in set(user.get("region_ids", []))
+
+
+def analytics_average_expression(column: str, resolution: str, alias: str, sample_column: str = "samples") -> str:
+    if resolution == "1m":
+        return f"avg({column}) AS {alias}"
+    if resolution in {"1h", "1d"}:
+        return f"sum({column} * {sample_column}) / nullif(sum({sample_column}), 0) AS {alias}"
+    raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d")
 
 
 async def resolve_station_region_id(connection, station_id: int) -> int | None:

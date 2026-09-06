@@ -144,7 +144,8 @@ SELECT
     avg(humidity) AS humidity,
     avg(wind_speed) AS wind_speed,
     avg(pm25) AS pm25,
-    count(*) AS samples
+    count(*) AS samples,
+    count(DISTINCT time_bucket('1 hour', time)) AS valid_hours
 FROM sensor_data
 GROUP BY bucket, station_id
 WITH NO DATA;

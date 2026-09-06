@@ -55,6 +55,7 @@ class SensorPoint(BaseModel):
     wind_speed: float | None = None
     pm25: float | None
     samples: int | None = None
+    valid_hours: int | None = None
 
 
 class AnalyticsPoint(BaseModel):

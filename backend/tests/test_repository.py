@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +12,7 @@ from app.repository import (
     classify_station_status,
     downsample_interval_seconds,
     estimated_candidate_points,
+    fetch_analytics_heatmap,
     fetch_analytics_scatter,
     fetch_analytics_series,
     fetch_station_data,
@@ -21,6 +23,7 @@ from app.repository import (
     station_downsample_source,
     validate_interactive_query_range,
 )
+from app.schemas import StationDataResponse
 
 
 def test_resolution_source_selects_raw_table_for_one_minute():
@@ -152,12 +155,54 @@ def test_station_data_source_selects_daily_continuous_aggregate():
     assert "valid_hours" in query
 
 
+def test_schema_daily_continuous_aggregate_defines_valid_hours():
+    schema = Path("db/init/001_schema.sql").read_text(encoding="utf-8")
+
+    daily_view = schema.split("CREATE MATERIALIZED VIEW IF NOT EXISTS sensor_data_daily", 1)[1].split(
+        "CREATE INDEX IF NOT EXISTS idx_sensor_data_hourly_station_bucket", 1
+    )[0]
+    assert "count(*) AS samples" in daily_view
+    assert "count(DISTINCT time_bucket('1 hour', time)) AS valid_hours" in daily_view
+
+
+def test_station_data_response_serializes_valid_hours():
+    row_time = datetime(2026, 9, 5, 0, 0, tzinfo=timezone.utc)
+    payload = StationDataResponse.model_validate(
+        {
+            "meta": query_meta("1d", "1d", 1000, 1, False, None),
+            "points": [
+                {
+                    "time": row_time,
+                    "temperature": 30.5,
+                    "humidity": 72.0,
+                    "wind_speed": 2.1,
+                    "pm25": 41.2,
+                    "samples": 24,
+                    "valid_hours": 18,
+                }
+            ],
+        }
+    )
+
+    assert payload.model_dump()["points"][0]["valid_hours"] == 18
+
+
 def test_station_downsample_source_aligns_buckets_to_requested_start_time():
     query, bucket_column = station_downsample_source("1m")
 
     assert bucket_column == "bucket"
     assert "extract(epoch from time) - extract(epoch from $2::timestamptz)" in query
     assert "+ extract(epoch from $2::timestamptz)" in query
+
+
+@pytest.mark.parametrize("resolution", ["1h", "1d"])
+def test_station_downsample_source_weights_continuous_aggregate_values(resolution):
+    query, _bucket_column = station_downsample_source(resolution)
+
+    assert "sum(temperature * samples) / nullif(sum(samples), 0) AS temperature" in query
+    assert "sum(humidity * samples) / nullif(sum(samples), 0) AS humidity" in query
+    assert "sum(wind_speed * samples) / nullif(sum(samples), 0) AS wind_speed" in query
+    assert "sum(pm25 * samples) / nullif(sum(samples), 0) AS pm25" in query
 
 
 class FakeStationDataConnection:
@@ -177,9 +222,17 @@ class FakeStationDataConnection:
 
 
 class FakeAnalyticsConnection:
-    def __init__(self, rows):
+    def __init__(self, rows, region_id=20):
         self.rows = rows
+        self.region_id = region_id
         self.fetch_calls = []
+        self.fetchrow_calls = []
+
+    async def fetchrow(self, query, *args):
+        self.fetchrow_calls.append((query, args))
+        if "SELECT region_id FROM stations" in query:
+            return {"region_id": self.region_id}
+        return None
 
     async def fetch(self, query, *args):
         self.fetch_calls.append((query, args))
@@ -283,6 +336,7 @@ def test_fetch_analytics_series_returns_envelope_and_uses_effective_resolution()
             start_time=row_time,
             end_time=row_time + timedelta(days=7),
             resolution="1m",
+            user={"roles": ["super_admin"], "region_ids": []},
             max_points=1000,
         )
     )
@@ -292,6 +346,49 @@ def test_fetch_analytics_series_returns_envelope_and_uses_effective_resolution()
     assert payload["meta"]["requested_resolution"] == "1m"
     assert payload["meta"]["effective_resolution"] == "1h"
     assert payload["points"][0]["aqi_level"] is not None
+
+
+@pytest.mark.parametrize("resolution", ["1h", "1d"])
+def test_analytics_series_downsampling_weights_continuous_aggregate_values(resolution):
+    row_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    connection = FakeAnalyticsConnection([])
+
+    asyncio.run(
+        fetch_analytics_series(
+            connection,
+            station_ids=[1],
+            metric="pm25",
+            start_time=row_time,
+            end_time=row_time + timedelta(days=120),
+            resolution=resolution,
+            user={"roles": ["super_admin"], "region_ids": []},
+            max_points=100,
+        )
+    )
+
+    query, _args = connection.fetch_calls[0]
+    assert "sum(data.pm25 * data.samples) / nullif(sum(data.samples), 0) AS value" in query
+
+
+def test_analytics_series_rejects_out_of_region_station():
+    row_time = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    connection = FakeAnalyticsConnection([], region_id=30)
+
+    with pytest.raises(PermissionError, match="outside assigned regions"):
+        asyncio.run(
+            fetch_analytics_series(
+                connection,
+                station_ids=[1],
+                metric="pm25",
+                start_time=row_time,
+                end_time=row_time + timedelta(hours=1),
+                resolution="1h",
+                user={"roles": ["viewer"], "region_ids": [20]},
+                max_points=1000,
+            )
+        )
+
+    assert connection.fetch_calls == []
 
 
 def test_fetch_analytics_scatter_returns_envelope_and_downsamples_pairs():
@@ -307,6 +404,7 @@ def test_fetch_analytics_scatter_returns_envelope_and_downsamples_pairs():
             start_time=row_time,
             end_time=row_time + timedelta(hours=24),
             resolution="1m",
+            user={"roles": ["super_admin"], "region_ids": []},
             max_points=100,
         )
     )
@@ -318,6 +416,71 @@ def test_fetch_analytics_scatter_returns_envelope_and_downsamples_pairs():
     assert payload["meta"]["downsampled"] is True
     assert payload["points"][0]["x"] == 30.0
     assert payload["points"][0]["y"] == 42.0
+
+
+@pytest.mark.parametrize("resolution", ["1h", "1d"])
+def test_analytics_scatter_downsampling_weights_continuous_aggregate_values(resolution):
+    row_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    connection = FakeAnalyticsConnection([])
+
+    asyncio.run(
+        fetch_analytics_scatter(
+            connection,
+            station_id=1,
+            x_metric="temperature",
+            y_metric="pm25",
+            start_time=row_time,
+            end_time=row_time + timedelta(days=120),
+            resolution=resolution,
+            user={"roles": ["super_admin"], "region_ids": []},
+            max_points=100,
+        )
+    )
+
+    query, _args = connection.fetch_calls[0]
+    assert "sum(temperature * samples) / nullif(sum(samples), 0) AS x" in query
+    assert "sum(pm25 * samples) / nullif(sum(samples), 0) AS y" in query
+
+
+def test_analytics_scatter_rejects_out_of_region_station():
+    row_time = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    connection = FakeAnalyticsConnection([], region_id=30)
+
+    with pytest.raises(PermissionError, match="outside assigned regions"):
+        asyncio.run(
+            fetch_analytics_scatter(
+                connection,
+                station_id=1,
+                x_metric="temperature",
+                y_metric="pm25",
+                start_time=row_time,
+                end_time=row_time + timedelta(hours=1),
+                resolution="1h",
+                user={"roles": ["viewer"], "region_ids": [20]},
+                max_points=1000,
+            )
+        )
+
+    assert connection.fetch_calls == []
+
+
+def test_analytics_heatmap_rejects_out_of_region_station():
+    row_time = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    connection = FakeAnalyticsConnection([], region_id=30)
+
+    with pytest.raises(PermissionError, match="outside assigned regions"):
+        asyncio.run(
+            fetch_analytics_heatmap(
+                connection,
+                station_id=1,
+                metric="pm25",
+                start_time=row_time,
+                end_time=row_time + timedelta(hours=1),
+                user={"roles": ["viewer"], "region_ids": [20]},
+            )
+        )
+
+    assert connection.fetch_calls == []
 
 
 def test_classify_station_status_marks_stale_station_offline():
