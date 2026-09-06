@@ -1,13 +1,24 @@
 import { demoLiveStations, demoSensorData, demoStations } from "./demoData.js";
 
-const localApi = window.location.port === "5173" ? "http://localhost:8000" : "";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || localApi;
+const browserWindow = typeof window !== "undefined" ? window : null;
+const localApi = browserWindow?.location?.port === "5173" ? "http://localhost:8000" : "";
+const API_BASE_URL = import.meta.env?.VITE_API_BASE_URL || localApi;
 const WS_BASE_URL =
-  import.meta.env.VITE_WS_BASE_URL ||
-  (API_BASE_URL ? API_BASE_URL.replace(/^http/, "ws") : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`);
+  import.meta.env?.VITE_WS_BASE_URL ||
+  (API_BASE_URL
+    ? API_BASE_URL.replace(/^http/, "ws")
+    : `${browserWindow?.location?.protocol === "https:" ? "wss" : "ws"}://${browserWindow?.location?.host || "localhost"}`);
 
 function userHeaders(currentUser) {
   return currentUser?.id ? { "X-User-Id": String(currentUser.id) } : {};
+}
+
+export function normalizeQueryEnvelope(payload) {
+  if (Array.isArray(payload)) return { meta: null, points: payload };
+  return {
+    meta: payload?.meta || null,
+    points: Array.isArray(payload?.points) ? payload.points : [],
+  };
 }
 
 export async function fetchStations(currentUser) {
@@ -50,11 +61,12 @@ export async function login({ username, password }) {
   }
 }
 
-export async function fetchStationData({ stationId, startTime, endTime, resolution, currentUser }) {
+export async function fetchStationData({ stationId, startTime, endTime, resolution, maxPoints = 1000, currentUser }) {
   const params = new URLSearchParams({
     start_time: new Date(startTime).toISOString(),
     end_time: new Date(endTime).toISOString(),
     resolution,
+    max_points: String(maxPoints),
   });
   try {
     const response = await fetch(`${API_BASE_URL}/api/stations/${stationId}/data?${params}`, {
@@ -63,9 +75,9 @@ export async function fetchStationData({ stationId, startTime, endTime, resoluti
     if (!response.ok) {
       throw new Error("Cannot load sensor data");
     }
-    return response.json();
+    return normalizeQueryEnvelope(await response.json());
   } catch {
-    return demoSensorData(stationId);
+    return normalizeQueryEnvelope(demoSensorData(stationId));
   }
 }
 
@@ -83,19 +95,20 @@ export async function fetchLiveStations(currentUser) {
   }
 }
 
-export async function fetchAnalyticsSeries({ stationIds, metric, startTime, endTime, resolution, currentUser }) {
+export async function fetchAnalyticsSeries({ stationIds, metric, startTime, endTime, resolution, maxPoints = 1000, currentUser }) {
   const params = new URLSearchParams({
     station_ids: stationIds.join(","),
     metric,
     start_time: new Date(startTime).toISOString(),
     end_time: new Date(endTime).toISOString(),
     resolution,
+    max_points: String(maxPoints),
   });
   const response = await fetch(`${API_BASE_URL}/api/analytics/series?${params}`, {
     headers: userHeaders(currentUser),
   });
   if (!response.ok) throw new Error("Cannot load analytics series");
-  return response.json();
+  return normalizeQueryEnvelope(await response.json());
 }
 
 export async function fetchAnalyticsHeatmap({ stationId, metric, startTime, endTime, currentUser }) {
@@ -112,7 +125,7 @@ export async function fetchAnalyticsHeatmap({ stationId, metric, startTime, endT
   return response.json();
 }
 
-export async function fetchAnalyticsScatter({ stationId, xMetric, yMetric, startTime, endTime, resolution, currentUser }) {
+export async function fetchAnalyticsScatter({ stationId, xMetric, yMetric, startTime, endTime, resolution, maxPoints = 1000, currentUser }) {
   const params = new URLSearchParams({
     station_id: String(stationId),
     x_metric: xMetric,
@@ -120,12 +133,13 @@ export async function fetchAnalyticsScatter({ stationId, xMetric, yMetric, start
     start_time: new Date(startTime).toISOString(),
     end_time: new Date(endTime).toISOString(),
     resolution,
+    max_points: String(maxPoints),
   });
   const response = await fetch(`${API_BASE_URL}/api/analytics/scatter?${params}`, {
     headers: userHeaders(currentUser),
   });
   if (!response.ok) throw new Error("Cannot load analytics scatter");
-  return response.json();
+  return normalizeQueryEnvelope(await response.json());
 }
 
 function normalizeStation(row) {
