@@ -100,6 +100,48 @@ def station_data_source(resolution: str) -> tuple[str, str]:
     raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d")
 
 
+def estimated_candidate_points(start_time: datetime, end_time: datetime, resolution: str) -> int:
+    duration = RESOLUTION_DURATIONS[resolution]
+    return int((end_time - start_time).total_seconds() // duration.total_seconds()) + 1
+
+
+def downsample_interval_seconds(candidate_points: int, max_points: int, resolution: str) -> int:
+    multiplier = ceil(candidate_points / max_points)
+    return int(multiplier * RESOLUTION_DURATIONS[resolution].total_seconds())
+
+
+def station_downsample_source(resolution: str) -> tuple[str, str]:
+    table, bucket_column = resolution_source(resolution)
+    sample_expressions = {
+        "1m": ("count(*)::bigint AS samples", "NULL::bigint AS valid_hours"),
+        "1h": ("sum(samples)::bigint AS samples", "NULL::bigint AS valid_hours"),
+        "1d": ("sum(samples)::bigint AS samples", "sum(valid_hours)::bigint AS valid_hours"),
+    }
+    try:
+        samples_expression, valid_hours_expression = sample_expressions[resolution]
+    except KeyError as exc:
+        raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d") from exc
+    return (
+        f"""
+        SELECT
+            to_timestamp(floor(extract(epoch from {bucket_column}) / $4) * $4) AS bucket,
+            avg(temperature) AS temperature,
+            avg(humidity) AS humidity,
+            avg(wind_speed) AS wind_speed,
+            avg(pm25) AS pm25,
+            {samples_expression},
+            {valid_hours_expression}
+        FROM {table}
+        WHERE station_id = $1
+          AND {bucket_column} >= $2
+          AND {bucket_column} <= $3
+        GROUP BY bucket
+        ORDER BY bucket
+        """,
+        "bucket",
+    )
+
+
 def validate_interactive_query_range(start_time: datetime, end_time: datetime, max_points: int) -> None:
     if start_time >= end_time:
         raise ValueError("start_time must be before end_time")
@@ -307,11 +349,19 @@ async def fetch_station_data(
         raise PermissionError("Station is outside assigned regions")
 
     effective_resolution, resolution_note = choose_effective_resolution(resolution, start_time, end_time)
-    query, bucket_column = station_data_source(effective_resolution)
-    rows = await connection.fetch(query, station_id, start_time, end_time)
+    candidate_points = estimated_candidate_points(start_time, end_time, effective_resolution)
+    downsampled = candidate_points > max_points
+    if downsampled:
+        query, bucket_column = station_downsample_source(effective_resolution)
+        interval_seconds = downsample_interval_seconds(candidate_points, max_points, effective_resolution)
+        rows = await connection.fetch(query, station_id, start_time, end_time, interval_seconds)
+        resolution_note = f"Returned {max_points} representative points from {candidate_points} available points."
+    else:
+        query, bucket_column = station_data_source(effective_resolution)
+        rows = await connection.fetch(query, station_id, start_time, end_time)
     points = [{**dict(row), "time": row[bucket_column]} for row in rows]
     return {
-        "meta": query_meta(resolution, effective_resolution, max_points, len(points), False, resolution_note),
+        "meta": query_meta(resolution, effective_resolution, max_points, len(points), downsampled, resolution_note),
         "points": points,
     }
 

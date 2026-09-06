@@ -7,6 +7,8 @@ from app.repository import (
     MAX_INTERACTIVE_POINTS_DEFAULT,
     can_modify_station,
     choose_effective_resolution,
+    downsample_interval_seconds,
+    estimated_candidate_points,
     classify_station_status,
     fetch_station_data,
     query_meta,
@@ -89,6 +91,17 @@ def test_validate_interactive_query_range_rejects_bad_ranges_and_points():
 
     with pytest.raises(ValueError, match="Interactive time range must not exceed 5 years"):
         validate_interactive_query_range(start, start + timedelta(days=365 * 5 + 1), MAX_INTERACTIVE_POINTS_DEFAULT)
+
+
+def test_downsample_interval_seconds_scales_by_effective_resolution():
+    assert estimated_candidate_points(
+        datetime(2026, 9, 1, tzinfo=timezone.utc),
+        datetime(2026, 9, 2, tzinfo=timezone.utc),
+        "1m",
+    ) == 1441
+
+    assert downsample_interval_seconds(candidate_points=1441, max_points=1000, resolution="1m") == 120
+    assert downsample_interval_seconds(candidate_points=2400, max_points=1000, resolution="1h") == 10800
 
 
 def test_query_meta_includes_required_fields():
@@ -174,6 +187,43 @@ def test_fetch_station_data_returns_meta_and_points_envelope():
     assert payload["meta"]["downsampled"] is False
     assert payload["points"][0]["time"] == row_time
     assert payload["points"][0]["pm25"] == 41.2
+
+
+def test_fetch_station_data_downsamples_when_candidate_count_exceeds_max_points():
+    row_time = datetime(2026, 9, 5, 0, 0, tzinfo=timezone.utc)
+    connection = FakeStationDataConnection(
+        region_id=20,
+        rows=[
+            {
+                "bucket": row_time,
+                "temperature": 30.5,
+                "humidity": 72.0,
+                "wind_speed": 2.1,
+                "pm25": 41.2,
+                "samples": 2,
+                "valid_hours": None,
+            }
+        ],
+    )
+
+    payload = asyncio.run(
+        fetch_station_data(
+            connection,
+            station_id=100,
+            start_time=row_time,
+            end_time=row_time + timedelta(hours=24),
+            resolution="1m",
+            user={"roles": ["super_admin"], "region_ids": []},
+            max_points=100,
+        )
+    )
+
+    query, args = connection.fetch_calls[0]
+    assert "floor(extract(epoch from time)" in query
+    assert args[3] == 900
+    assert payload["meta"]["downsampled"] is True
+    assert payload["meta"]["returned_points"] == 1
+    assert payload["meta"]["resolution_note"] == "Returned 100 representative points from 1441 available points."
 
 
 def test_classify_station_status_marks_stale_station_offline():
