@@ -1,11 +1,21 @@
 import json
 from datetime import datetime, timedelta, timezone
+from math import ceil
 from typing import Any
 
 
 STALE_AFTER = timedelta(minutes=30)
 WARNING_LIMITS = {"pm25": 35.0, "temperature": 38.0, "humidity": 85.0}
 CRITICAL_LIMITS = {"pm25": 150.0, "temperature": 42.0, "humidity": 95.0}
+MAX_INTERACTIVE_POINTS_DEFAULT = 1000
+MIN_INTERACTIVE_POINTS = 100
+MAX_INTERACTIVE_POINTS = 5000
+MAX_INTERACTIVE_RANGE = timedelta(days=365 * 5)
+RESOLUTION_DURATIONS = {
+    "1m": timedelta(minutes=1),
+    "1h": timedelta(hours=1),
+    "1d": timedelta(days=1),
+}
 
 
 async def ensure_runtime_schema(connection) -> None:
@@ -27,6 +37,44 @@ def resolution_source(resolution: str) -> tuple[str, str]:
         return sources[resolution]
     except KeyError as exc:
         raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d") from exc
+
+
+def validate_interactive_query_range(start_time: datetime, end_time: datetime, max_points: int) -> None:
+    if start_time >= end_time:
+        raise ValueError("start_time must be before end_time")
+    if max_points < MIN_INTERACTIVE_POINTS or max_points > MAX_INTERACTIVE_POINTS:
+        raise ValueError("max_points must be between 100 and 5000")
+    if end_time - start_time > MAX_INTERACTIVE_RANGE:
+        raise ValueError("Interactive time range must not exceed 5 years")
+
+
+def choose_effective_resolution(requested_resolution: str, start_time: datetime, end_time: datetime) -> tuple[str, str | None]:
+    span = end_time - start_time
+    if requested_resolution == "1m" and span > timedelta(hours=48):
+        return "1h", "Switched from 1m to 1h because the selected range is longer than 48 hours."
+    if requested_resolution == "1h" and span > timedelta(days=90):
+        return "1d", "Switched from 1h to 1d because the selected range is longer than 90 days."
+    if requested_resolution in RESOLUTION_DURATIONS:
+        return requested_resolution, None
+    raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d")
+
+
+def query_meta(
+    requested_resolution: str,
+    effective_resolution: str,
+    max_points: int,
+    returned_points: int,
+    downsampled: bool,
+    resolution_note: str | None,
+) -> dict:
+    return {
+        "requested_resolution": requested_resolution,
+        "effective_resolution": effective_resolution,
+        "max_points": max_points,
+        "returned_points": returned_points,
+        "downsampled": downsampled,
+        "resolution_note": resolution_note,
+    }
 
 
 def authentication_query() -> str:
