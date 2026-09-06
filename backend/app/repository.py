@@ -50,10 +50,10 @@ def validate_interactive_query_range(start_time: datetime, end_time: datetime, m
 
 def choose_effective_resolution(requested_resolution: str, start_time: datetime, end_time: datetime) -> tuple[str, str | None]:
     span = end_time - start_time
+    if requested_resolution in {"1m", "1h"} and span > timedelta(days=90):
+        return "1d", f"Switched from {requested_resolution} to 1d because the selected range is longer than 90 days."
     if requested_resolution == "1m" and span > timedelta(hours=48):
         return "1h", "Switched from 1m to 1h because the selected range is longer than 48 hours."
-    if requested_resolution == "1h" and span > timedelta(days=90):
-        return "1d", "Switched from 1h to 1d because the selected range is longer than 90 days."
     if requested_resolution in RESOLUTION_DURATIONS:
         return requested_resolution, None
     raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d")

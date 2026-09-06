@@ -52,6 +52,16 @@ def test_choose_effective_resolution_upgrades_one_minute_after_48_hours():
     assert note == "Switched from 1m to 1h because the selected range is longer than 48 hours."
 
 
+def test_choose_effective_resolution_upgrades_one_minute_after_90_days():
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    end = start + timedelta(days=120)
+
+    effective, note = choose_effective_resolution("1m", start, end)
+
+    assert effective == "1d"
+    assert note == "Switched from 1m to 1d because the selected range is longer than 90 days."
+
+
 def test_choose_effective_resolution_upgrades_one_hour_after_90_days():
     start = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
     end = start + timedelta(days=120)
