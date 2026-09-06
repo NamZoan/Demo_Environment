@@ -133,7 +133,7 @@ export default function StationParameters({ onBack, station }) {
   const [csvPreview, setCsvPreview] = useState(null);
   const [csvLoading, setCsvLoading] = useState(false);
   const mockSeries = useMemo(() => createMockSeries(station.id, range), [range, station.id]);
-  const series = backendSeries.length > 0 ? backendSeries : mockSeries;
+  const series = dataSource === "backend" ? backendSeries : mockSeries;
   const selectedRange = rangeConfig[range];
   const optimizationNote = queryOptimizationNote(queryMeta);
   const effectiveResolution = queryMeta?.effective_resolution || selectedRange.resolution;
@@ -170,7 +170,7 @@ export default function StationParameters({ onBack, station }) {
         const normalized = normalizeSeries(payload.points, payload.meta?.effective_resolution || selectedRange.resolution);
         setQueryMeta(payload.meta);
         setBackendSeries(normalized);
-        setDataSource(normalized.length > 0 ? "backend" : "mock");
+        setDataSource("backend");
       })
       .catch(() => {
         if (cancelled) return;
@@ -242,23 +242,28 @@ export default function StationParameters({ onBack, station }) {
             {station.code} - {station.region} - {station.latitude}, {station.longitude}
           </p>
         </div>
-        <label className="grid gap-1 text-sm text-slate-600">
-          <span className="flex items-center gap-2">
-            <CalendarDays className="h-4 w-4" />
-            Khoảng thời gian
-          </span>
-          <select
-            className="h-10 rounded-md border border-slate-300 bg-white px-3 outline-none focus:border-cyan-600"
-            onChange={(event) => setRange(event.target.value)}
-            value={range}
-          >
-            {rangeOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="grid gap-2">
+          <label className="grid gap-1 text-sm text-slate-600">
+            <span className="flex items-center gap-2">
+              <CalendarDays className="h-4 w-4" />
+              Khoảng thời gian
+            </span>
+            <select
+              className="h-10 rounded-md border border-slate-300 bg-white px-3 outline-none focus:border-cyan-600"
+              onChange={(event) => setRange(event.target.value)}
+              value={range}
+            >
+              {rangeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {optimizationNote && (
+            <p className="max-w-sm rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-800">{optimizationNote}</p>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -281,10 +286,6 @@ export default function StationParameters({ onBack, station }) {
           );
         })}
       </div>
-
-      {optimizationNote && (
-        <p className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-800">{optimizationNote}</p>
-      )}
 
       <div className="grid gap-4 xl:grid-cols-[.8fr_1.2fr]">
         <section className="rounded-lg border border-slate-200 bg-white p-4">
