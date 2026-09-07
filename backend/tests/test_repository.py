@@ -721,6 +721,25 @@ def test_fetch_live_stations_uses_only_station_qcvn_config():
     assert stations[1]["qcvn_thresholds"] == {}
 
 
+def test_fetch_live_stations_applies_one_qcvn_to_multiple_assigned_stations():
+    now = datetime.now(timezone.utc)
+    connection = FakeLiveStationsConnection(
+        station_rows=[
+            {"id": 1, "code": "A", "name": "Station A", "latitude": 10.0, "longitude": 106.0, "address": "A", "station_status": "active", "metadata": {}, "region_id": 10, "last_seen_at": now, "time": now, "temperature": 25.0, "humidity": 70.0, "wind_speed": 2.0, "pm25": 80.0},
+            {"id": 2, "code": "B", "name": "Station B", "latitude": 10.0, "longitude": 106.0, "address": "B", "station_status": "active", "metadata": {}, "region_id": 10, "last_seen_at": now, "time": now, "temperature": 25.0, "humidity": 70.0, "wind_speed": 2.0, "pm25": 80.0},
+        ],
+        config_rows=[
+            {"station_id": 1, "region_id": None, "metric": "pm25", "warning_min": None, "warning_max": 35.0, "critical_min": None, "critical_max": 150.0},
+            {"station_id": 2, "region_id": None, "metric": "pm25", "warning_min": None, "warning_max": 35.0, "critical_min": None, "critical_max": 150.0},
+        ],
+    )
+
+    stations = asyncio.run(fetch_live_stations(connection, {"roles": ["super_admin"], "region_ids": []}))
+
+    assert stations[0]["qcvn_thresholds"]["pm25"]["warning_max"] == 35.0
+    assert stations[1]["qcvn_thresholds"]["pm25"]["warning_max"] == 35.0
+
+
 def test_fetch_live_stations_does_not_alert_unconfigured_station():
     now = datetime.now(timezone.utc)
     connection = FakeLiveStationsConnection(

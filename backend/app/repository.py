@@ -94,6 +94,17 @@ async def ensure_runtime_schema(connection) -> None:
         JOIN ftp_servers f ON f.legacy_station_id = c.station_id
         ON CONFLICT (station_id) DO NOTHING;
         CREATE INDEX IF NOT EXISTS idx_ftp_files_station_seen ON ftp_files (station_id, last_seen_at DESC);
+        CREATE TABLE IF NOT EXISTS qcvn_station_assignments (
+            qcvn_config_id BIGINT NOT NULL REFERENCES alert_configs(id) ON DELETE CASCADE,
+            station_id BIGINT NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+            assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (qcvn_config_id, station_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_qcvn_station_assignments_station ON qcvn_station_assignments (station_id);
+        ALTER TABLE alert_configs DROP CONSTRAINT IF EXISTS alert_configs_check;
+        INSERT INTO qcvn_station_assignments (qcvn_config_id, station_id)
+        SELECT id, station_id FROM alert_configs WHERE station_id IS NOT NULL
+        ON CONFLICT DO NOTHING;
         """
     )
 
@@ -602,9 +613,7 @@ async def fetch_stations(connection) -> list[dict]:
 def qcvn_config_row(row) -> dict:
     return {
         "id": row["id"],
-        "station_id": row["station_id"],
-        "station_code": row["station_code"],
-        "station_name": row["station_name"],
+        "station_ids": list(row["station_ids"] or []),
         "metric": row["metric"],
         "warning_min": row["warning_min"],
         "warning_max": row["warning_max"],
@@ -620,15 +629,13 @@ async def fetch_qcvn_configs(connection, user: dict) -> list[dict]:
     args: list[Any] = []
     region_filter = ""
     if "super_admin" not in user.get("roles", []):
-        region_filter = "AND s.region_id = ANY($1::bigint[])"
+        region_filter = "HAVING bool_and(s.id IS NULL OR COALESCE(s.region_id = ANY($1::bigint[]), FALSE))"
         args.append(user.get("region_ids", []))
     rows = await connection.fetch(
         f"""
         SELECT
             ac.id,
-            ac.station_id,
-            s.code AS station_code,
-            s.name AS station_name,
+            COALESCE(array_agg(DISTINCT a.station_id) FILTER (WHERE a.station_id IS NOT NULL), ARRAY[]::bigint[]) AS station_ids,
             ac.metric,
             ac.warning_min,
             ac.warning_max,
@@ -638,10 +645,12 @@ async def fetch_qcvn_configs(connection, user: dict) -> list[dict]:
             ac.created_at,
             ac.updated_at
         FROM alert_configs ac
-        JOIN stations s ON s.id = ac.station_id
-        WHERE ac.station_id IS NOT NULL
+        LEFT JOIN qcvn_station_assignments a ON a.qcvn_config_id = ac.id
+        LEFT JOIN stations s ON s.id = a.station_id
+        WHERE TRUE
+        GROUP BY ac.id
         {region_filter}
-        ORDER BY s.code, ac.metric
+        ORDER BY ac.metric, ac.id
         """,
         *args,
     )
@@ -653,9 +662,7 @@ async def fetch_qcvn_config(connection, config_id: int) -> dict | None:
         """
         SELECT
             ac.id,
-            ac.station_id,
-            s.code AS station_code,
-            s.name AS station_name,
+            COALESCE(array_agg(DISTINCT a.station_id) FILTER (WHERE a.station_id IS NOT NULL), ARRAY[]::bigint[]) AS station_ids,
             ac.metric,
             ac.warning_min,
             ac.warning_max,
@@ -665,47 +672,52 @@ async def fetch_qcvn_config(connection, config_id: int) -> dict | None:
             ac.created_at,
             ac.updated_at
         FROM alert_configs ac
-        JOIN stations s ON s.id = ac.station_id
-        WHERE ac.id = $1 AND ac.station_id IS NOT NULL
+        LEFT JOIN qcvn_station_assignments a ON a.qcvn_config_id = ac.id
+        LEFT JOIN stations s ON s.id = a.station_id
+        WHERE ac.id = $1
+        GROUP BY ac.id
         """,
         config_id,
     )
     return qcvn_config_row(row) if row else None
 
 
-async def qcvn_station_region_id(connection, station_id: int) -> int | None:
-    row = await connection.fetchrow("SELECT region_id FROM stations WHERE id = $1", station_id)
-    if row is None:
+async def qcvn_station_region_ids(connection, station_ids: list[int]) -> list[int | None]:
+    if not station_ids:
+        return []
+    rows = await connection.fetch("SELECT id, region_id FROM stations WHERE id = ANY($1::bigint[])", station_ids)
+    if len(rows) != len(station_ids):
         raise LookupError("Station not found")
-    return row["region_id"]
+    return [row["region_id"] for row in rows]
 
 
-def require_qcvn_station_access(user: dict, region_id: int | None) -> None:
-    if not can_modify_station(user, region_id):
-        raise PermissionError("You do not have permission to manage QCVN for this station")
+def require_qcvn_access(user: dict, region_ids: list[int | None]) -> None:
+    if not region_ids and "super_admin" not in user.get("roles", []):
+        raise PermissionError("Only a super admin can manage an unassigned QCVN")
+    if any(not can_modify_station(user, region_id) for region_id in region_ids):
+        raise PermissionError("You do not have permission to manage QCVN for one or more stations")
 
 
 async def create_qcvn_config(connection, payload: dict, user: dict) -> dict:
-    station_id = payload["station_id"]
-    region_id = await qcvn_station_region_id(connection, station_id)
-    require_qcvn_station_access(user, region_id)
+    station_ids = sorted(set(payload.get("station_ids", [])))
+    require_qcvn_access(user, await qcvn_station_region_ids(connection, station_ids))
     existing = await connection.fetchval(
-        "SELECT id FROM alert_configs WHERE station_id = $1 AND metric = $2",
-        station_id,
-        payload["metric"],
-    )
+        """SELECT a.id FROM alert_configs a
+           JOIN qcvn_station_assignments x ON x.qcvn_config_id = a.id
+           WHERE a.metric = $1 AND x.station_id = ANY($2::bigint[]) LIMIT 1""",
+        payload["metric"], station_ids,
+    ) if station_ids else None
     if existing is not None:
-        raise ValueError("QCVN configuration already exists for this station and metric")
+        raise ValueError("QCVN configuration already exists for one or more selected stations and metrics")
     row = await connection.fetchrow(
         """
         INSERT INTO alert_configs (
-            station_id, metric, warning_min, warning_max,
+            metric, warning_min, warning_max,
             critical_min, critical_max, enabled, created_by
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
         """,
-        station_id,
         payload["metric"],
         payload.get("warning_min"),
         payload.get("warning_max"),
@@ -714,6 +726,11 @@ async def create_qcvn_config(connection, payload: dict, user: dict) -> dict:
         payload.get("enabled", True),
         user.get("id"),
     )
+    if station_ids:
+        await connection.executemany(
+            "INSERT INTO qcvn_station_assignments (qcvn_config_id, station_id) VALUES ($1, $2)",
+            [(row["id"], station_id) for station_id in station_ids],
+        )
     return await fetch_qcvn_config(connection, row["id"])
 
 
@@ -721,17 +738,19 @@ async def update_qcvn_config(connection, config_id: int, payload: dict, user: di
     existing = await fetch_qcvn_config(connection, config_id)
     if existing is None:
         return None
-    current_region_id = await qcvn_station_region_id(connection, existing["station_id"])
-    require_qcvn_station_access(user, current_region_id)
-    target_region_id = await qcvn_station_region_id(connection, payload["station_id"])
-    require_qcvn_station_access(user, target_region_id)
+    current_regions = await qcvn_station_region_ids(connection, existing["station_ids"])
+    station_ids = sorted(set(payload.get("station_ids", [])))
+    target_regions = await qcvn_station_region_ids(connection, station_ids)
+    require_qcvn_access(user, current_regions)
+    require_qcvn_access(user, target_regions)
     duplicate = await connection.fetchval(
         """
-        SELECT id FROM alert_configs
-        WHERE station_id = $1 AND metric = $2 AND id <> $3
+        SELECT a.id FROM alert_configs a
+        JOIN qcvn_station_assignments x ON x.qcvn_config_id = a.id
+        WHERE a.metric = $1 AND x.station_id = ANY($2::bigint[]) AND a.id <> $3
         """,
-        payload["station_id"],
         payload["metric"],
+        station_ids,
         config_id,
     )
     if duplicate is not None:
@@ -739,18 +758,16 @@ async def update_qcvn_config(connection, config_id: int, payload: dict, user: di
     await connection.execute(
         """
         UPDATE alert_configs
-        SET station_id = $2,
-            metric = $3,
-            warning_min = $4,
-            warning_max = $5,
-            critical_min = $6,
-            critical_max = $7,
-            enabled = $8,
+        SET metric = $2,
+            warning_min = $3,
+            warning_max = $4,
+            critical_min = $5,
+            critical_max = $6,
+            enabled = $7,
             updated_at = now()
         WHERE id = $1
         """,
         config_id,
-        payload["station_id"],
         payload["metric"],
         payload.get("warning_min"),
         payload.get("warning_max"),
@@ -758,6 +775,12 @@ async def update_qcvn_config(connection, config_id: int, payload: dict, user: di
         payload.get("critical_max"),
         payload.get("enabled", True),
     )
+    await connection.execute("DELETE FROM qcvn_station_assignments WHERE qcvn_config_id = $1", config_id)
+    if station_ids:
+        await connection.executemany(
+            "INSERT INTO qcvn_station_assignments (qcvn_config_id, station_id) VALUES ($1, $2)",
+            [(config_id, station_id) for station_id in station_ids],
+        )
     return await fetch_qcvn_config(connection, config_id)
 
 
@@ -765,8 +788,7 @@ async def delete_qcvn_config(connection, config_id: int, user: dict) -> bool:
     existing = await fetch_qcvn_config(connection, config_id)
     if existing is None:
         return False
-    region_id = await qcvn_station_region_id(connection, existing["station_id"])
-    require_qcvn_station_access(user, region_id)
+    require_qcvn_access(user, await qcvn_station_region_ids(connection, existing["station_ids"]))
     result = await connection.execute("DELETE FROM alert_configs WHERE id = $1", config_id)
     return result.endswith("1")
 
@@ -1441,11 +1463,12 @@ async def fetch_live_station_qcvn_thresholds(connection, station_rows) -> dict[i
 
     config_rows = await connection.fetch(
         """
-        SELECT station_id, region_id, metric, warning_min, warning_max, critical_min, critical_max
-        FROM alert_configs
-        WHERE enabled = TRUE
-          AND metric = ANY($1::text[])
-          AND station_id = ANY($2::bigint[])
+        SELECT a.station_id, ac.region_id, ac.metric, ac.warning_min, ac.warning_max, ac.critical_min, ac.critical_max
+        FROM alert_configs ac
+        JOIN qcvn_station_assignments a ON a.qcvn_config_id = ac.id
+        WHERE ac.enabled = TRUE
+          AND ac.metric = ANY($1::text[])
+          AND a.station_id = ANY($2::bigint[])
         """,
         list(SENSOR_METRIC_COLUMNS.keys()),
         station_ids,
@@ -1453,8 +1476,7 @@ async def fetch_live_station_qcvn_thresholds(connection, station_rows) -> dict[i
     by_station: dict[int, dict[str, dict[str, float | None]]] = {}
     for row in config_rows:
         threshold = qcvn_threshold_row(row)
-        if row["station_id"] is not None:
-            by_station.setdefault(row["station_id"], {})[row["metric"]] = threshold
+        by_station.setdefault(row["station_id"], {})[row["metric"]] = threshold
 
     thresholds: dict[int, dict[str, dict[str, float | None]]] = {}
     for row in station_rows:

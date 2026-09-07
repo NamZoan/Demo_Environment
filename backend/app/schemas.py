@@ -90,7 +90,7 @@ class LiveStation(Station):
 
 
 class QcvnConfigCreate(BaseModel):
-    station_id: int = Field(gt=0)
+    station_ids: list[int] = Field(default_factory=list)
     metric: Literal["pm25", "temperature", "humidity"]
     warning_min: float | None = None
     warning_max: float | None = None
@@ -105,8 +105,6 @@ class QcvnConfigUpdate(QcvnConfigCreate):
 
 class QcvnConfigResponse(QcvnConfigCreate):
     id: int
-    station_code: str
-    station_name: str
     created_at: datetime
     updated_at: datetime
 

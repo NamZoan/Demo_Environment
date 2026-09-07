@@ -157,9 +157,17 @@ CREATE TABLE IF NOT EXISTS alert_configs (
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CHECK (region_id IS NOT NULL OR station_id IS NOT NULL)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS qcvn_station_assignments (
+    qcvn_config_id BIGINT NOT NULL REFERENCES alert_configs(id) ON DELETE CASCADE,
+    station_id BIGINT NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+    assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (qcvn_config_id, station_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_qcvn_station_assignments_station ON qcvn_station_assignments (station_id);
 
 CREATE TABLE IF NOT EXISTS audit_logs (
     id BIGSERIAL PRIMARY KEY,

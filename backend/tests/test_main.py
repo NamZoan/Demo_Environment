@@ -89,8 +89,8 @@ def test_analytics_routes_return_404_for_missing_station(monkeypatch, route_name
 
 
 def test_add_qcvn_config_route_delegates_station_threshold_payload(monkeypatch):
-    payload = QcvnConfigCreate(station_id=7, metric="pm25", warning_max=35, critical_max=150)
-    expected = {"id": 1, "station_id": 7, "metric": "pm25", "warning_max": 35, "critical_max": 150}
+    payload = QcvnConfigCreate(station_ids=[7, 8], metric="pm25", warning_max=35, critical_max=150)
+    expected = {"id": 1, "station_ids": [7, 8], "metric": "pm25", "warning_max": 35, "critical_max": 150}
     captured = {}
 
     async def fake_create(connection, data, user):
@@ -103,12 +103,12 @@ def test_add_qcvn_config_route_delegates_station_threshold_payload(monkeypatch):
     result = asyncio.run(main.add_qcvn_config(payload, {"id": 1, "roles": ["super_admin"], "region_ids": []}))
 
     assert result == expected
-    assert captured["station_id"] == 7
+    assert captured["station_ids"] == [7, 8]
     assert captured["warning_max"] == 35.0
 
 
 def test_edit_qcvn_config_route_returns_not_found(monkeypatch):
-    payload = QcvnConfigUpdate(station_id=7, metric="pm25", warning_max=35, critical_max=150)
+    payload = QcvnConfigUpdate(station_ids=[7], metric="pm25", warning_max=35, critical_max=150)
 
     async def missing_update(*args):
         return None
