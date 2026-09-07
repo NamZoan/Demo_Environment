@@ -107,6 +107,7 @@ services:
   ftp-worker:
     build:
       context: ./worker
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
       FTP_CREDENTIALS_KEY: development-only-change-me
@@ -116,15 +117,25 @@ services:
       FTP_SERVER_ID: 3
       POLL_SECONDS: 5
       ARCHIVE_PROCESSED_FILES: "false"
+      RETRY_ATTEMPTS: 3
+      RETRY_INITIAL_DELAY_SECONDS: 1
+      RETRY_MAX_DELAY_SECONDS: 30
     volumes:
       - ftp_data:/ftp
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: python -m app.healthcheck
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   ftp-worker-2:
     build:
       context: ./worker
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
       FTP_CREDENTIALS_KEY: development-only-change-me
@@ -134,15 +145,25 @@ services:
       FTP_SERVER_ID: 5
       POLL_SECONDS: 5
       ARCHIVE_PROCESSED_FILES: "false"
+      RETRY_ATTEMPTS: 3
+      RETRY_INITIAL_DELAY_SECONDS: 1
+      RETRY_MAX_DELAY_SECONDS: 30
     volumes:
       - ftp_data_2:/ftp
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: python -m app.healthcheck
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   ftp-worker-3:
     build:
       context: ./worker
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
       FTP_CREDENTIALS_KEY: development-only-change-me
@@ -152,15 +173,25 @@ services:
       FTP_SERVER_ID: 6
       POLL_SECONDS: 5
       ARCHIVE_PROCESSED_FILES: "false"
+      RETRY_ATTEMPTS: 3
+      RETRY_INITIAL_DELAY_SECONDS: 1
+      RETRY_MAX_DELAY_SECONDS: 30
     volumes:
       - ftp_data_3:/ftp
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: python -m app.healthcheck
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   ftp-worker-4:
     build:
       context: ./worker
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
       FTP_CREDENTIALS_KEY: development-only-change-me
@@ -170,15 +201,25 @@ services:
       FTP_SERVER_ID: 7
       POLL_SECONDS: 5
       ARCHIVE_PROCESSED_FILES: "false"
+      RETRY_ATTEMPTS: 3
+      RETRY_INITIAL_DELAY_SECONDS: 1
+      RETRY_MAX_DELAY_SECONDS: 30
     volumes:
       - ftp_data_4:/ftp
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: python -m app.healthcheck
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   ftp-worker-5:
     build:
       context: ./worker
+    restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
       FTP_CREDENTIALS_KEY: development-only-change-me
@@ -188,11 +229,20 @@ services:
       FTP_SERVER_ID: 8
       POLL_SECONDS: 5
       ARCHIVE_PROCESSED_FILES: "false"
+      RETRY_ATTEMPTS: 3
+      RETRY_INITIAL_DELAY_SECONDS: 1
+      RETRY_MAX_DELAY_SECONDS: 30
     volumes:
       - ftp_data_5:/ftp
     depends_on:
       db:
         condition: service_healthy
+    healthcheck:
+      test: python -m app.healthcheck
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   iot-simulator-1:
     build:

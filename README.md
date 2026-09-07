@@ -103,6 +103,22 @@ Inside the worker container, files move through:
 The simulator uploads each file into `/data/sensor_001/` through `/data/sensor_100/`.
 The worker scans those folders recursively, creates missing `sensor_###` stations, writes `sensor_data`, and updates `latest_station_readings`.
 
+## Worker Operations
+
+Check all worker service states with:
+
+```bash
+docker compose ps
+```
+
+Follow the primary worker logs with:
+
+```bash
+docker compose logs -f ftp-worker
+```
+
+An unhealthy worker cannot connect to the database for its healthcheck. Docker restarts workers that exit under the `unless-stopped` policy; investigate an unhealthy worker's logs and database availability.
+
 ## API
 
 List stations:
