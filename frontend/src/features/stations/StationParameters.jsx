@@ -27,6 +27,7 @@ import {
 
 import { fetchFtpFile, fetchFtpFiles, fetchFtpIndex, fetchFtpStatus, fetchStationData } from "../../api.js";
 import { defaultStationTimeRange, isStationTimeRangeValid, queryOptimizationNote, stationResolutionOptions } from "./stationTimeRange.js";
+import { stationTableRows } from "./stationDataTable.js";
 
 const metricConfig = [
   { key: "temperature", thresholdKey: "temperature", label: "Nhiệt độ", unit: "C", icon: Thermometer, warning: 38, critical: 42 },
@@ -133,6 +134,7 @@ export default function StationParameters({ onBack, station }) {
   const pageSize = 100;
   const [dataLoading, setDataLoading] = useState(false);
   const [backendSeries, setBackendSeries] = useState([]);
+  const [tableRows, setTableRows] = useState([]);
   const [queryMeta, setQueryMeta] = useState(null);
   const [dataSource, setDataSource] = useState("mock");
   const [ftpStatus, setFtpStatus] = useState(null);
@@ -182,12 +184,14 @@ export default function StationParameters({ onBack, station }) {
         const normalized = normalizeSeries(payload.points, payload.meta?.effective_resolution || submittedQuery.resolution);
         setQueryMeta(payload.meta);
         setBackendSeries(normalized);
+        setTableRows(stationTableRows(payload.points));
         setDataSource("backend");
       })
       .catch(() => {
         if (cancelled) return;
         setQueryMeta(null);
         setBackendSeries([]);
+        setTableRows([]);
         setDataSource("mock");
         setQueryError("Không thể tải dữ liệu trạm trong khoảng thời gian đã chọn.");
       })
@@ -209,6 +213,7 @@ export default function StationParameters({ onBack, station }) {
     setPage(1);
     setQueryMeta(null);
     setBackendSeries([]);
+    setTableRows([]);
     setQueryError("");
   }, [station.id, station.code]);
 
@@ -548,6 +553,48 @@ export default function StationParameters({ onBack, station }) {
           </div>
         )}
       </section>
+
+      {querySubmitted && (
+        <section className="rounded-lg border border-slate-200 bg-white p-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">Dữ liệu thông số môi trường</h2>
+              <p className="text-sm text-slate-500">Kết quả theo bộ lọc thời gian và độ phân giải đã chọn.</p>
+            </div>
+            {queryMeta && <span className="text-sm text-slate-500">{queryMeta.total_points} điểm dữ liệu</span>}
+          </div>
+          {dataLoading ? (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm text-slate-500">Đang tải dữ liệu...</div>
+          ) : tableRows.length === 0 ? (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm text-slate-500">Không có dữ liệu trong khoảng thời gian đã chọn.</div>
+          ) : (
+            <div className="overflow-x-auto rounded-md border border-slate-200">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="whitespace-nowrap px-3 py-2">Thời gian</th>
+                    <th className="whitespace-nowrap px-3 py-2">Nhiệt độ (°C)</th>
+                    <th className="whitespace-nowrap px-3 py-2">Độ ẩm (%)</th>
+                    <th className="whitespace-nowrap px-3 py-2">Tốc độ gió (km/h)</th>
+                    <th className="whitespace-nowrap px-3 py-2">PM2.5 (µg/m³)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tableRows.map((row) => (
+                    <tr className="border-t border-slate-100" key={`${row.time}-${row.temperature}-${row.pm25}`}>
+                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{formatDateTime(row.time)}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.temperature ?? "-"}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.humidity ?? "-"}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.windSpeed ?? "-"}</td>
+                      <td className="px-3 py-2 text-slate-700">{row.pm25 ?? "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
     </section>
   );
 }
