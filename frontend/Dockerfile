@@ -7,6 +7,7 @@ RUN npm ci
 
 COPY index.html .
 COPY src ./src
+COPY postcss.config.js tailwind.config.js ./
 
 RUN npm run build
 
