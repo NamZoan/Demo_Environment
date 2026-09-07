@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
 
-from simulator import build_csv_content, build_local_filename, generate_sensor_reading, remote_sensor_dir
+from simulator import build_csv_content, build_local_filename, build_sensor_ids, generate_sensor_reading, remote_sensor_dir
 
 
 def test_generate_sensor_reading_uses_expected_ranges_and_iso_timestamp():
@@ -51,3 +51,7 @@ def test_build_local_filename_contains_sensor_id_and_utc_timestamp():
 
 def test_remote_sensor_dir_uses_sensor_specific_data_directory():
     assert remote_sensor_dir("/data", "sensor_100") == "/data/sensor_100"
+
+
+def test_build_sensor_ids_supports_unique_ranges_per_ftp():
+    assert build_sensor_ids(3, 2) == ["sensor_003", "sensor_004"]

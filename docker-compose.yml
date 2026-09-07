@@ -120,7 +120,71 @@ services:
       db:
         condition: service_healthy
 
-  iot-simulator:
+  ftp-worker-2:
+    build:
+      context: ./worker
+    environment:
+      DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
+      FTP_CREDENTIALS_KEY: development-only-change-me
+      FTP_INCOMING_DIR: /ftp/data
+      FTP_ARCHIVE_DIR: /ftp/archive
+      FTP_ERROR_DIR: /ftp/error
+      POLL_SECONDS: 5
+    volumes:
+      - ftp_data_2:/ftp
+    depends_on:
+      db:
+        condition: service_healthy
+
+  ftp-worker-3:
+    build:
+      context: ./worker
+    environment:
+      DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
+      FTP_CREDENTIALS_KEY: development-only-change-me
+      FTP_INCOMING_DIR: /ftp/data
+      FTP_ARCHIVE_DIR: /ftp/archive
+      FTP_ERROR_DIR: /ftp/error
+      POLL_SECONDS: 5
+    volumes:
+      - ftp_data_3:/ftp
+    depends_on:
+      db:
+        condition: service_healthy
+
+  ftp-worker-4:
+    build:
+      context: ./worker
+    environment:
+      DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
+      FTP_CREDENTIALS_KEY: development-only-change-me
+      FTP_INCOMING_DIR: /ftp/data
+      FTP_ARCHIVE_DIR: /ftp/archive
+      FTP_ERROR_DIR: /ftp/error
+      POLL_SECONDS: 5
+    volumes:
+      - ftp_data_4:/ftp
+    depends_on:
+      db:
+        condition: service_healthy
+
+  ftp-worker-5:
+    build:
+      context: ./worker
+    environment:
+      DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
+      FTP_CREDENTIALS_KEY: development-only-change-me
+      FTP_INCOMING_DIR: /ftp/data
+      FTP_ARCHIVE_DIR: /ftp/archive
+      FTP_ERROR_DIR: /ftp/error
+      POLL_SECONDS: 5
+    volumes:
+      - ftp_data_5:/ftp
+    depends_on:
+      db:
+        condition: service_healthy
+
+  iot-simulator-1:
     build:
       context: ./iot-simulator
     environment:
@@ -129,7 +193,8 @@ services:
       FTP_USER: station
       FTP_PASSWORD: stationpass
       REMOTE_BASE_DIR: /data
-      SENSOR_COUNT: 100
+      SENSOR_START: 1
+      SENSOR_COUNT: 2
       INTERVAL_SECONDS: 60
       LOCAL_OUTBOX_DIR: /tmp/iot-outbox
       UPLOAD_RETRIES: 3
@@ -138,6 +203,86 @@ services:
       LOG_LEVEL: INFO
     depends_on:
       - ftp-server
+
+  iot-simulator-2:
+    build:
+      context: ./iot-simulator
+    environment:
+      FTP_HOST: ftp-server-2
+      FTP_PORT: 21
+      FTP_USER: station2
+      FTP_PASSWORD: stationpass2
+      REMOTE_BASE_DIR: /data
+      SENSOR_START: 3
+      SENSOR_COUNT: 2
+      INTERVAL_SECONDS: 60
+      LOCAL_OUTBOX_DIR: /tmp/iot-outbox
+      UPLOAD_RETRIES: 3
+      RETRY_BACKOFF_SECONDS: 3
+      FTP_PASSIVE_MODE: "true"
+      LOG_LEVEL: INFO
+    depends_on:
+      - ftp-server-2
+
+  iot-simulator-3:
+    build:
+      context: ./iot-simulator
+    environment:
+      FTP_HOST: ftp-server-3
+      FTP_PORT: 21
+      FTP_USER: station3
+      FTP_PASSWORD: stationpass3
+      REMOTE_BASE_DIR: /data
+      SENSOR_START: 5
+      SENSOR_COUNT: 2
+      INTERVAL_SECONDS: 60
+      LOCAL_OUTBOX_DIR: /tmp/iot-outbox
+      UPLOAD_RETRIES: 3
+      RETRY_BACKOFF_SECONDS: 3
+      FTP_PASSIVE_MODE: "true"
+      LOG_LEVEL: INFO
+    depends_on:
+      - ftp-server-3
+
+  iot-simulator-4:
+    build:
+      context: ./iot-simulator
+    environment:
+      FTP_HOST: ftp-server-4
+      FTP_PORT: 21
+      FTP_USER: station4
+      FTP_PASSWORD: stationpass4
+      REMOTE_BASE_DIR: /data
+      SENSOR_START: 7
+      SENSOR_COUNT: 2
+      INTERVAL_SECONDS: 60
+      LOCAL_OUTBOX_DIR: /tmp/iot-outbox
+      UPLOAD_RETRIES: 3
+      RETRY_BACKOFF_SECONDS: 3
+      FTP_PASSIVE_MODE: "true"
+      LOG_LEVEL: INFO
+    depends_on:
+      - ftp-server-4
+
+  iot-simulator-5:
+    build:
+      context: ./iot-simulator
+    environment:
+      FTP_HOST: ftp-server-5
+      FTP_PORT: 21
+      FTP_USER: station5
+      FTP_PASSWORD: stationpass5
+      REMOTE_BASE_DIR: /data
+      SENSOR_START: 9
+      SENSOR_COUNT: 2
+      INTERVAL_SECONDS: 60
+      LOCAL_OUTBOX_DIR: /tmp/iot-outbox
+      UPLOAD_RETRIES: 3
+      RETRY_BACKOFF_SECONDS: 3
+      FTP_PASSIVE_MODE: "true"
+      LOG_LEVEL: INFO
+    depends_on:
+      - ftp-server-5
 
   frontend:
     build:
