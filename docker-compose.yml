@@ -114,6 +114,7 @@ services:
       FTP_ARCHIVE_DIR: /ftp/archive
       FTP_ERROR_DIR: /ftp/error
       POLL_SECONDS: 5
+      ARCHIVE_PROCESSED_FILES: "false"
     volumes:
       - ftp_data:/ftp
     depends_on:
@@ -130,6 +131,7 @@ services:
       FTP_ARCHIVE_DIR: /ftp/archive
       FTP_ERROR_DIR: /ftp/error
       POLL_SECONDS: 5
+      ARCHIVE_PROCESSED_FILES: "false"
     volumes:
       - ftp_data_2:/ftp
     depends_on:
@@ -146,6 +148,7 @@ services:
       FTP_ARCHIVE_DIR: /ftp/archive
       FTP_ERROR_DIR: /ftp/error
       POLL_SECONDS: 5
+      ARCHIVE_PROCESSED_FILES: "false"
     volumes:
       - ftp_data_3:/ftp
     depends_on:
@@ -162,6 +165,7 @@ services:
       FTP_ARCHIVE_DIR: /ftp/archive
       FTP_ERROR_DIR: /ftp/error
       POLL_SECONDS: 5
+      ARCHIVE_PROCESSED_FILES: "false"
     volumes:
       - ftp_data_4:/ftp
     depends_on:
@@ -178,6 +182,7 @@ services:
       FTP_ARCHIVE_DIR: /ftp/archive
       FTP_ERROR_DIR: /ftp/error
       POLL_SECONDS: 5
+      ARCHIVE_PROCESSED_FILES: "false"
     volumes:
       - ftp_data_5:/ftp
     depends_on:
