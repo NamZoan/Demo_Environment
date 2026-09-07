@@ -1,9 +1,10 @@
-import { Activity, BarChart3, Camera, Database, FileCheck2, HardDrive, MapPinned, Settings, ShieldCheck, Siren } from "lucide-react";
+import { Activity, BarChart3, Camera, Database, FileCheck2, HardDrive, MapPinned, Server, Settings, ShieldCheck, Siren } from "lucide-react";
 
 const menuItems = [
   { id: "dashboard", label: "Điều hành tổng quan", icon: BarChart3 },
   { id: "stations", label: "WebGIS & Trạm", icon: MapPinned },
   { id: "parameters", label: "Dữ liệu quan trắc", icon: Activity },
+  { id: "ftp", label: "Quản lý FTP", icon: Server },
   { id: "qcvn", label: "Cảnh báo QCVN", icon: Siren },
   { id: "approval", label: "Kiểm duyệt dữ liệu", icon: FileCheck2 },
   { id: "camera", label: "Camera & Lấy mẫu", icon: Camera },

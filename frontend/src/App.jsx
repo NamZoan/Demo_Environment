@@ -8,6 +8,7 @@ import AnalyticsReports from "./features/analytics/AnalyticsReports.jsx";
 import Dashboard from "./features/dashboard/Dashboard.jsx";
 import StationManager from "./features/stations/StationManager.jsx";
 import StationParameters from "./features/stations/StationParameters.jsx";
+import FtpManagement from "./features/ftp/FtpManagement.jsx";
 import { createMockStations } from "./services/mockApi.js";
 import { resolveBackendStations } from "./services/stationState.js";
 
@@ -20,6 +21,7 @@ const routeByPage = {
   camera: "/camera",
   backend: "/backend",
   settings: "/settings",
+  ftp: "/ftp",
   rbac: "/rbac",
 };
 
@@ -32,6 +34,7 @@ function activePageFromPath(pathname) {
   if (pathname.startsWith("/camera")) return "camera";
   if (pathname.startsWith("/backend")) return "backend";
   if (pathname.startsWith("/settings")) return "settings";
+  if (pathname.startsWith("/ftp")) return "ftp";
   if (pathname.startsWith("/rbac")) return "rbac";
   return "dashboard";
 }
@@ -218,6 +221,7 @@ function AppShell() {
         <Route element={<PlaceholderPage description="Theo dõi camera trạm, lịch lấy mẫu tự động và trạng thái lệnh điều khiển thiết bị." title="Camera & Lấy mẫu" />} path="/camera" />
         <Route element={<BackendDatabasePage backendHealth={backendHealth} dataSource={dataSource} stations={stations} />} path="/backend" />
         <Route element={<PlaceholderPage description="Quản lý datalogger, FTP/MQTT, QCVN, thông số và kết nối liên thông." title="Cấu hình hệ thống" />} path="/settings" />
+        <Route element={<FtpManagement currentUser={currentUser} stations={stations} />} path="/ftp" />
         <Route element={<PlaceholderPage description="Quản lý người dùng, vai trò, đơn vị và phạm vi dữ liệu theo khu vực." title="Phân quyền" />} path="/rbac" />
         <Route element={<Navigate replace to="/dashboard" />} path="*" />
       </Routes>

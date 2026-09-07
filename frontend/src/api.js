@@ -206,6 +206,40 @@ export async function testFtpConnection(payload, currentUser) {
   return response.json();
 }
 
+export async function fetchFtpConfigs(currentUser) {
+  const response = await fetch(`${API_BASE_URL}/api/ftp/configs`, { headers: userHeaders(currentUser) });
+  if (!response.ok) throw new Error("Không thể tải cấu hình FTP");
+  return response.json();
+}
+
+export async function createFtpConfig(payload, currentUser) {
+  const response = await fetch(`${API_BASE_URL}/api/ftp/configs`, {
+    method: "POST",
+    headers: { ...userHeaders(currentUser), "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || "Không thể thêm cấu hình FTP");
+  return response.json();
+}
+
+export async function updateFtpConfig(stationId, payload, currentUser) {
+  const response = await fetch(`${API_BASE_URL}/api/ftp/configs/${stationId}`, {
+    method: "PUT",
+    headers: { ...userHeaders(currentUser), "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || "Không thể cập nhật cấu hình FTP");
+  return response.json();
+}
+
+export async function deleteFtpConfig(stationId, currentUser) {
+  const response = await fetch(`${API_BASE_URL}/api/ftp/configs/${stationId}`, {
+    method: "DELETE",
+    headers: userHeaders(currentUser),
+  });
+  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || "Không thể xóa cấu hình FTP");
+}
+
 function sortSimulatorStationsFirst(left, right) {
   const leftIsSensor = left.code.startsWith("sensor_");
   const rightIsSensor = right.code.startsWith("sensor_");

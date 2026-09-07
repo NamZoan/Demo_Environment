@@ -456,6 +456,31 @@ async def fetch_station_ftp_config(connection, station_id: int, encryption_key: 
     return dict(row) if row else None
 
 
+async def fetch_ftp_configs(connection, user: dict) -> list[dict]:
+    region_filter = "" if "super_admin" in user.get("roles", []) else "AND s.region_id = ANY($1::bigint[])"
+    args = [] if not region_filter else [user.get("region_ids", [])]
+    rows = await connection.fetch(
+        f"""
+        SELECT c.station_id, s.code AS station_code, s.name AS station_name,
+               c.host, c.port, c.username AS user, c.root_path, c.timeout_seconds
+        FROM station_ftp_configs c
+        JOIN stations s ON s.id = c.station_id
+        WHERE TRUE {region_filter}
+        ORDER BY s.code
+        """,
+        *args,
+    )
+    return [dict(row) for row in rows]
+
+
+async def delete_station_ftp_config(connection, station_id: int, user: dict) -> bool:
+    station_region_id = await resolve_station_region_id(connection, station_id)
+    if not can_modify_station(user, station_region_id):
+        raise PermissionError("User cannot modify this station FTP configuration")
+    result = await connection.execute("DELETE FROM station_ftp_configs WHERE station_id = $1", station_id)
+    return result.endswith("1")
+
+
 async def fetch_ftp_file_index(connection, station_id: int, user: dict) -> list[dict]:
     station_region_id = await resolve_station_region_id(connection, station_id)
     if not can_read_station(user, station_region_id):

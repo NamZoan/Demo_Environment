@@ -12,6 +12,7 @@ from app.ftp_browser import FtpConnectionSettings, check_ftp_status, list_ftp_di
 from app.repository import (
     MAX_INTERACTIVE_POINTS_DEFAULT,
     authenticate_user,
+    can_modify_station,
     create_station,
     delete_station,
     ensure_runtime_schema,
@@ -21,7 +22,11 @@ from app.repository import (
     fetch_live_stations,
     fetch_overview,
     fetch_station_data,
+    fetch_station_by_id,
     fetch_station_ftp_config,
+    fetch_ftp_configs,
+    delete_station_ftp_config,
+    save_station_ftp_config,
     fetch_ftp_file_index,
     fetch_stations_for_user,
     fetch_user_context,
@@ -43,6 +48,9 @@ from app.schemas import (
     StationDataResponse,
     StationUpdate,
     FtpConnectionRequest,
+    FtpConfigCreate,
+    FtpConfigUpdate,
+    FtpConfigResponse,
 )
 
 
@@ -266,6 +274,65 @@ async def test_ftp_connection(payload: FtpConnectionRequest, user: dict = Depend
             "root_path": ftp_config.get("root_path", payload.root_path),
             "error": str(exc),
         }
+
+
+@app.get("/api/ftp/configs", response_model=list[FtpConfigResponse])
+async def ftp_configs(user: dict = Depends(current_user)) -> list[dict]:
+    async with database.acquire() as connection:
+        return await fetch_ftp_configs(connection, user)
+
+
+@app.post("/api/ftp/configs", response_model=FtpConfigResponse, status_code=201)
+async def add_ftp_config(payload: FtpConfigCreate, user: dict = Depends(current_user)) -> dict:
+    async with database.acquire() as connection:
+        try:
+            station = await fetch_station_by_id(connection, payload.station_id)
+            if station is None:
+                raise HTTPException(status_code=404, detail="Station not found")
+            if not can_modify_station(user, station.get("region_id")):
+                raise HTTPException(status_code=403, detail="User cannot modify this station")
+            async with connection.transaction():
+                await save_station_ftp_config(connection, payload.station_id, payload.model_dump(), settings.ftp_credentials_key)
+            configs = await fetch_ftp_configs(connection, {"roles": ["super_admin"], "region_ids": []})
+            return next(config for config in configs if config["station_id"] == payload.station_id)
+        except asyncpg.UniqueViolationError as exc:
+            raise HTTPException(status_code=409, detail="FTP configuration already exists for this station") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/ftp/configs/{station_id}", response_model=FtpConfigResponse)
+async def edit_ftp_config(station_id: int, payload: FtpConfigUpdate, user: dict = Depends(current_user)) -> dict:
+    async with database.acquire() as connection:
+        existing = await fetch_station_ftp_config(connection, station_id, settings.ftp_credentials_key)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="FTP configuration not found")
+        station = await fetch_station_by_id(connection, station_id)
+        if station is None or not can_modify_station(user, station.get("region_id")):
+            raise HTTPException(status_code=403, detail="User cannot modify this station")
+        merged = payload.model_dump()
+        merged["password"] = merged["password"] or existing["password"]
+        try:
+            async with connection.transaction():
+                await save_station_ftp_config(connection, station_id, merged, settings.ftp_credentials_key)
+            configs = await fetch_ftp_configs(connection, {"roles": ["super_admin"], "region_ids": []})
+            return next(config for config in configs if config["station_id"] == station_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.delete("/api/ftp/configs/{station_id}", status_code=204)
+async def remove_ftp_config(station_id: int, user: dict = Depends(current_user)) -> Response:
+    async with database.acquire() as connection:
+        try:
+            deleted = await delete_station_ftp_config(connection, station_id, user)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="FTP configuration not found")
+    return Response(status_code=204)
 
 
 @app.get("/api/ftp/status", response_model=FtpStatus)
