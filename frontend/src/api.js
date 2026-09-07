@@ -158,6 +158,7 @@ export function normalizeStation(row) {
     longitude: row.longitude,
     status: liveStatus === "offline" ? "offline" : row.status === "maintenance" ? "maintenance" : "online",
     lastSeenAt: row.last_seen_at || row.time,
+    ftp_assignment: row.ftp_assignment || null,
     qcvnThresholds: row.qcvn_thresholds || {},
     metrics: {
       temperature: row.temperature ?? 0,

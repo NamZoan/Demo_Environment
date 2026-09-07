@@ -78,6 +78,7 @@ async def ensure_runtime_schema(connection) -> None:
             assigned_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
         CREATE INDEX IF NOT EXISTS idx_station_ftp_assignments_server ON station_ftp_assignments (ftp_server_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_station_ftp_assignment_folder ON station_ftp_assignments (ftp_server_id, root_path) WHERE root_path <> '/data';
         INSERT INTO ftp_servers (name, host, port, username, password_encrypted, root_path, timeout_seconds, legacy_station_id)
         SELECT COALESCE(s.code, 'FTP station ' || c.station_id::text), c.host, c.port, c.username,
                c.password_encrypted, c.root_path, c.timeout_seconds, c.station_id
@@ -550,8 +551,11 @@ async def disable_managed_user(connection, user_id: int, actor_id: int) -> bool:
 async def fetch_stations(connection) -> list[dict]:
     rows = await connection.fetch(
         """
-        SELECT id, code, name, latitude, longitude, address, status, metadata, region_id, last_seen_at
-        FROM stations
+        SELECT s.id, s.code, s.name, s.latitude, s.longitude, s.address, s.status, s.metadata, s.region_id, s.last_seen_at,
+               a.ftp_server_id, a.root_path AS ftp_folder, f.name AS ftp_name
+        FROM stations s
+        LEFT JOIN station_ftp_assignments a ON a.station_id = s.id
+        LEFT JOIN ftp_servers f ON f.id = a.ftp_server_id
         ORDER BY code
         """
     )
@@ -735,9 +739,12 @@ async def fetch_stations_for_user(connection, user: dict) -> list[dict]:
         return await fetch_stations(connection)
     rows = await connection.fetch(
         """
-        SELECT id, code, name, latitude, longitude, address, status, metadata, region_id, last_seen_at
-        FROM stations
-        WHERE region_id = ANY($1::bigint[])
+        SELECT s.id, s.code, s.name, s.latitude, s.longitude, s.address, s.status, s.metadata, s.region_id, s.last_seen_at,
+               a.ftp_server_id, a.root_path AS ftp_folder, f.name AS ftp_name
+        FROM stations s
+        LEFT JOIN station_ftp_assignments a ON a.station_id = s.id
+        LEFT JOIN ftp_servers f ON f.id = a.ftp_server_id
+        WHERE s.region_id = ANY($1::bigint[])
         ORDER BY code
         """,
         user.get("region_ids", []),
@@ -748,9 +755,12 @@ async def fetch_stations_for_user(connection, user: dict) -> list[dict]:
 async def fetch_station_by_id(connection, station_id: int) -> dict | None:
     row = await connection.fetchrow(
         """
-        SELECT id, code, name, latitude, longitude, address, status, metadata, region_id, last_seen_at
-        FROM stations
-        WHERE id = $1
+        SELECT s.id, s.code, s.name, s.latitude, s.longitude, s.address, s.status, s.metadata, s.region_id, s.last_seen_at,
+               a.ftp_server_id, a.root_path AS ftp_folder, f.name AS ftp_name
+        FROM stations s
+        LEFT JOIN station_ftp_assignments a ON a.station_id = s.id
+        LEFT JOIN ftp_servers f ON f.id = a.ftp_server_id
+        WHERE s.id = $1
         """,
         station_id,
     )
@@ -776,8 +786,13 @@ async def create_station(connection, payload: dict, user: dict, encryption_key: 
         payload.get("region_id"),
     )
     station = _station_row(row)
+    if payload.get("ftp_config") and payload.get("ftp_assignment"):
+        raise ValueError("Use either a legacy FTP configuration or an FTP folder assignment")
     if payload.get("ftp_config"):
         await save_station_ftp_config(connection, station["id"], payload["ftp_config"], encryption_key)
+    if payload.get("ftp_assignment"):
+        await save_station_ftp_assignment(connection, station["id"], payload["ftp_assignment"], user)
+    station = await fetch_station_by_id(connection, station["id"])
     await insert_audit_log(connection, user["id"], "station.create", "station", station["id"], None, station)
     return station
 
@@ -817,10 +832,55 @@ async def update_station(connection, station_id: int, payload: dict, user: dict,
         merged.get("region_id"),
     )
     station = _station_row(row)
+    if payload.get("ftp_config") and payload.get("ftp_assignment"):
+        raise ValueError("Use either a legacy FTP configuration or an FTP folder assignment")
     if payload.get("ftp_config"):
         await save_station_ftp_config(connection, station_id, payload["ftp_config"], encryption_key)
+    if payload.get("ftp_assignment"):
+        await save_station_ftp_assignment(connection, station_id, payload["ftp_assignment"], user)
+    station = await fetch_station_by_id(connection, station_id)
     await insert_audit_log(connection, user["id"], "station.update", "station", station_id, existing, station)
     return station
+
+
+async def save_station_ftp_assignment(connection, station_id: int, assignment: dict, user: dict) -> None:
+    ftp_server_id = int(assignment["ftp_server_id"])
+    ftp_server = await fetch_ftp_server(connection, ftp_server_id, user)
+    if ftp_server is None:
+        raise ValueError("FTP configuration not found or unavailable")
+
+    folder_path = normalize_ftp_path(assignment["folder_path"])
+    root_path = normalize_ftp_path(ftp_server.get("root_path", "/data"))
+    if folder_path == root_path:
+        raise ValueError("Please select a folder inside the FTP root")
+    if not folder_path.startswith(f"{root_path}/"):
+        raise ValueError("Selected folder must be inside the FTP root")
+
+    duplicate = await connection.fetchrow(
+        """
+        SELECT station_id FROM station_ftp_assignments
+        WHERE ftp_server_id = $1 AND root_path = $2 AND station_id <> $3
+        """,
+        ftp_server_id,
+        folder_path,
+        station_id,
+    )
+    if duplicate:
+        raise ValueError("This FTP folder is already assigned to another station")
+
+    await connection.execute(
+        """
+        INSERT INTO station_ftp_assignments (station_id, ftp_server_id, root_path)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (station_id) DO UPDATE SET
+            ftp_server_id = EXCLUDED.ftp_server_id,
+            root_path = EXCLUDED.root_path,
+            assigned_at = now()
+        """,
+        station_id,
+        ftp_server_id,
+        folder_path,
+    )
 
 
 async def save_station_ftp_config(connection, station_id: int, ftp_config: dict, encryption_key: str) -> None:
@@ -911,7 +971,7 @@ async def fetch_ftp_connection_settings(connection, ftp_id: int, user: dict, enc
 
 
 async def fetch_ftp_configs(connection, user: dict) -> list[dict]:
-    region_filter = "" if "super_admin" in user.get("roles", []) else "WHERE EXISTS (SELECT 1 FROM station_ftp_assignments xa JOIN stations xs ON xs.id = xa.station_id WHERE xa.ftp_server_id = f.id AND xs.region_id = ANY($1::bigint[]))"
+    region_filter = "" if "super_admin" in user.get("roles", []) else "WHERE NOT EXISTS (SELECT 1 FROM station_ftp_assignments xu WHERE xu.ftp_server_id = f.id) OR EXISTS (SELECT 1 FROM station_ftp_assignments xa JOIN stations xs ON xs.id = xa.station_id WHERE xa.ftp_server_id = f.id AND xs.region_id = ANY($1::bigint[]))"
     args = [] if not region_filter else [user.get("region_ids", [])]
     rows = await connection.fetch(
         f"""
@@ -932,8 +992,6 @@ async def fetch_ftp_configs(connection, user: dict) -> list[dict]:
 
 
 async def create_ftp_server(connection, payload: dict, user: dict, encryption_key: str) -> dict:
-    station_ids = sorted(set(payload.get("station_ids", [])))
-    await validate_ftp_station_assignments(connection, station_ids, user)
     row = await connection.fetchrow(
         """
         INSERT INTO ftp_servers (name, host, port, username, password_encrypted, root_path, timeout_seconds)
@@ -949,7 +1007,6 @@ async def create_ftp_server(connection, payload: dict, user: dict, encryption_ke
         normalize_ftp_path(payload.get("root_path", "/data")),
         payload.get("timeout_seconds", 5),
     )
-    await replace_ftp_station_assignments(connection, row["id"], station_ids, payload.get("root_path", "/data"))
     return await fetch_ftp_server(connection, row["id"], user)
 
 
@@ -985,8 +1042,6 @@ async def update_ftp_server(connection, ftp_id: int, payload: dict, user: dict, 
     existing = await fetch_ftp_server(connection, ftp_id, {"roles": ["super_admin"], "region_ids": []})
     if existing is None:
         return None
-    station_ids = sorted(set(payload.get("station_ids", [])))
-    await validate_ftp_station_assignments(connection, station_ids, user)
     password = payload.get("password")
     if password:
         await connection.execute(
@@ -1007,7 +1062,6 @@ async def update_ftp_server(connection, ftp_id: int, payload: dict, user: dict, 
             ftp_id, payload["name"], payload["host"], payload.get("port", 21), payload["user"],
             normalize_ftp_path(payload.get("root_path", "/data")), payload.get("timeout_seconds", 5),
         )
-    await replace_ftp_station_assignments(connection, ftp_id, station_ids, payload.get("root_path", "/data"))
     return await fetch_ftp_server(connection, ftp_id, user)
 
 
@@ -1461,6 +1515,17 @@ def _station_row(row) -> dict:
     item = dict(row)
     if isinstance(item.get("metadata"), str):
         item["metadata"] = json.loads(item["metadata"])
+    ftp_server_id = item.pop("ftp_server_id", None)
+    ftp_folder = item.pop("ftp_folder", None)
+    ftp_name = item.pop("ftp_name", None)
+    if ftp_server_id is not None:
+        item["ftp_assignment"] = {
+            "ftp_server_id": ftp_server_id,
+            "folder_path": ftp_folder,
+            "ftp_name": ftp_name,
+        }
+    else:
+        item["ftp_assignment"] = None
     return item
 
 

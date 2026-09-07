@@ -108,6 +108,7 @@ CREATE TABLE IF NOT EXISTS station_ftp_assignments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_station_ftp_assignments_server ON station_ftp_assignments (ftp_server_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_station_ftp_assignment_folder ON station_ftp_assignments (ftp_server_id, root_path) WHERE root_path <> '/data';
 
 INSERT INTO ftp_servers (name, host, port, username, password_encrypted, root_path, timeout_seconds, legacy_station_id)
 SELECT COALESCE(s.code, 'FTP station ' || c.station_id::text), c.host, c.port, c.username,

@@ -16,6 +16,7 @@ class Station(BaseModel):
     region_id: int | None = None
     last_seen_at: datetime | None = None
     ftp_config: dict[str, Any] | None = None
+    ftp_assignment: dict[str, Any] | None = None
 
 
 class FtpConnectionRequest(BaseModel):
@@ -47,6 +48,11 @@ class FtpConfigUpdate(BaseModel):
     station_ids: list[int] = Field(default_factory=list)
 
 
+class StationFtpAssignment(BaseModel):
+    ftp_server_id: int = Field(gt=0)
+    folder_path: str = Field(min_length=1, max_length=1024)
+
+
 class StationCreate(BaseModel):
     code: str
     name: str
@@ -57,6 +63,7 @@ class StationCreate(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     region_id: int | None = None
     ftp_config: FtpConfigInput | None = None
+    ftp_assignment: StationFtpAssignment | None = None
 
 
 class StationUpdate(BaseModel):
@@ -69,6 +76,7 @@ class StationUpdate(BaseModel):
     metadata: dict[str, Any] | None = None
     region_id: int | None = None
     ftp_config: FtpConfigInput | None = None
+    ftp_assignment: StationFtpAssignment | None = None
 
 
 class LiveStation(Station):

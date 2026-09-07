@@ -113,6 +113,7 @@ services:
       FTP_INCOMING_DIR: /ftp/data
       FTP_ARCHIVE_DIR: /ftp/archive
       FTP_ERROR_DIR: /ftp/error
+      FTP_SERVER_ID: 3
       POLL_SECONDS: 5
       ARCHIVE_PROCESSED_FILES: "false"
     volumes:
@@ -130,6 +131,7 @@ services:
       FTP_INCOMING_DIR: /ftp/data
       FTP_ARCHIVE_DIR: /ftp/archive
       FTP_ERROR_DIR: /ftp/error
+      FTP_SERVER_ID: 5
       POLL_SECONDS: 5
       ARCHIVE_PROCESSED_FILES: "false"
     volumes:
@@ -147,6 +149,7 @@ services:
       FTP_INCOMING_DIR: /ftp/data
       FTP_ARCHIVE_DIR: /ftp/archive
       FTP_ERROR_DIR: /ftp/error
+      FTP_SERVER_ID: 6
       POLL_SECONDS: 5
       ARCHIVE_PROCESSED_FILES: "false"
     volumes:
@@ -164,6 +167,7 @@ services:
       FTP_INCOMING_DIR: /ftp/data
       FTP_ARCHIVE_DIR: /ftp/archive
       FTP_ERROR_DIR: /ftp/error
+      FTP_SERVER_ID: 7
       POLL_SECONDS: 5
       ARCHIVE_PROCESSED_FILES: "false"
     volumes:
@@ -181,6 +185,7 @@ services:
       FTP_INCOMING_DIR: /ftp/data
       FTP_ARCHIVE_DIR: /ftp/archive
       FTP_ERROR_DIR: /ftp/error
+      FTP_SERVER_ID: 8
       POLL_SECONDS: 5
       ARCHIVE_PROCESSED_FILES: "false"
     volumes:

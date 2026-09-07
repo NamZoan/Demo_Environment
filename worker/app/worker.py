@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
+import posixpath
 import shutil
 import time
+from dataclasses import replace
 from pathlib import Path
+
+import psycopg
 
 from app.db import bulk_upsert_readings
 from app.parser import parse_sensor_file
@@ -19,6 +23,7 @@ FTP_ARCHIVE_DIR = Path(os.getenv("FTP_ARCHIVE_DIR", "/ftp/archive"))
 FTP_ERROR_DIR = Path(os.getenv("FTP_ERROR_DIR", "/ftp/error"))
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "5"))
 ARCHIVE_PROCESSED_FILES = os.getenv("ARCHIVE_PROCESSED_FILES", "true").lower() == "true"
+FTP_SERVER_ID = int(os.getenv("FTP_SERVER_ID", "0"))
 PROCESSED_FILE_SIGNATURES: set[tuple[str, int, int]] = set()
 
 
@@ -34,6 +39,7 @@ def main() -> None:
 
 
 def process_once() -> None:
+    folder_station_codes = fetch_folder_station_codes()
     for path in sorted(FTP_INCOMING_DIR.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in {".csv", ".json"}:
             continue
@@ -44,6 +50,9 @@ def process_once() -> None:
         destination_dir = FTP_ARCHIVE_DIR
         try:
             readings = parse_sensor_file(path)
+            station_code = station_code_for_path(path, folder_station_codes)
+            if station_code:
+                readings = [replace(reading, station_code=station_code) for reading in readings]
             inserted = bulk_upsert_readings(DATABASE_URL, readings)
             logger.info("Processed %s with %s rows", path.name, inserted)
             if not ARCHIVE_PROCESSED_FILES:
@@ -58,6 +67,38 @@ def process_once() -> None:
                 if target.exists():
                     target = destination_dir / f"{path.stem}-{int(time.time())}{path.suffix}"
                 shutil.move(str(path), str(target))
+
+
+def fetch_folder_station_codes() -> dict[str, str]:
+    if not FTP_SERVER_ID:
+        return {}
+    with psycopg.connect(DATABASE_URL) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT a.root_path, s.code
+                FROM station_ftp_assignments a
+                JOIN stations s ON s.id = a.station_id
+                WHERE a.ftp_server_id = %s AND a.root_path <> '/data'
+                """,
+                (FTP_SERVER_ID,),
+            )
+            return {root_path: station_code for root_path, station_code in cursor.fetchall()}
+
+
+def station_code_for_path(path: Path, folder_station_codes: dict[str, str]) -> str | None:
+    if not FTP_SERVER_ID:
+        return None
+    relative = path.relative_to(FTP_INCOMING_DIR)
+    folder_path = posixpath.join("/data", relative.parent.as_posix())
+    matches = [
+        (assigned_folder, station_code)
+        for assigned_folder, station_code in folder_station_codes.items()
+        if folder_path == assigned_folder or folder_path.startswith(f"{assigned_folder}/")
+    ]
+    if not matches:
+        raise ValueError(f"FTP folder is not assigned to a station: {folder_path}")
+    return max(matches, key=lambda item: len(item[0]))[1]
 
 
 if __name__ == "__main__":

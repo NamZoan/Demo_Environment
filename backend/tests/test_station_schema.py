@@ -25,3 +25,14 @@ def test_station_update_applies_the_same_coordinate_bounds():
         StationUpdate(latitude=90.1)
     with pytest.raises(ValidationError):
         StationUpdate(longitude=-180.1)
+
+
+def test_station_create_accepts_an_ftp_folder_assignment():
+    station = StationCreate(
+        code="HN-001",
+        name="Ha Noi",
+        ftp_assignment={"ftp_server_id": 3, "folder_path": "/data/sensor_001"},
+    )
+
+    assert station.ftp_assignment.ftp_server_id == 3
+    assert station.ftp_assignment.folder_path == "/data/sensor_001"
