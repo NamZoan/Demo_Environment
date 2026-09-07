@@ -34,7 +34,7 @@ services:
     environment:
       FTP_USER: station
       FTP_PASS: stationpass
-      PASV_ADDRESS: ftp-server
+      PASV_ADDRESS: 161.248.81.149
       PASV_MIN_PORT: 21100
       PASV_MAX_PORT: 21110
       LOCAL_UMASK: "022"
@@ -43,6 +43,66 @@ services:
       - "21100-21110:21100-21110"
     volumes:
       - ftp_data:/home/vsftpd/station
+
+  ftp-server-2:
+    image: fauria/vsftpd
+    environment:
+      FTP_USER: station2
+      FTP_PASS: stationpass2
+      PASV_ADDRESS: 161.248.81.149
+      PASV_MIN_PORT: 21111
+      PASV_MAX_PORT: 21120
+      LOCAL_UMASK: "022"
+    ports:
+      - "2121:21"
+      - "21111-21120:21111-21120"
+    volumes:
+      - ftp_data_2:/home/vsftpd/station2
+
+  ftp-server-3:
+    image: fauria/vsftpd
+    environment:
+      FTP_USER: station3
+      FTP_PASS: stationpass3
+      PASV_ADDRESS: 161.248.81.149
+      PASV_MIN_PORT: 21121
+      PASV_MAX_PORT: 21130
+      LOCAL_UMASK: "022"
+    ports:
+      - "2122:21"
+      - "21121-21130:21121-21130"
+    volumes:
+      - ftp_data_3:/home/vsftpd/station3
+
+  ftp-server-4:
+    image: fauria/vsftpd
+    environment:
+      FTP_USER: station4
+      FTP_PASS: stationpass4
+      PASV_ADDRESS: 161.248.81.149
+      PASV_MIN_PORT: 21131
+      PASV_MAX_PORT: 21140
+      LOCAL_UMASK: "022"
+    ports:
+      - "2123:21"
+      - "21131-21140:21131-21140"
+    volumes:
+      - ftp_data_4:/home/vsftpd/station4
+
+  ftp-server-5:
+    image: fauria/vsftpd
+    environment:
+      FTP_USER: station5
+      FTP_PASS: stationpass5
+      PASV_ADDRESS: 161.248.81.149
+      PASV_MIN_PORT: 21141
+      PASV_MAX_PORT: 21150
+      LOCAL_UMASK: "022"
+    ports:
+      - "2124:21"
+      - "21141-21150:21141-21150"
+    volumes:
+      - ftp_data_5:/home/vsftpd/station5
 
   ftp-worker:
     build:
@@ -90,3 +150,7 @@ services:
 volumes:
   db_data:
   ftp_data:
+  ftp_data_2:
+  ftp_data_3:
+  ftp_data_4:
+  ftp_data_5:
