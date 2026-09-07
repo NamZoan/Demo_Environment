@@ -2,7 +2,7 @@ import { Database } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
-import { createStation as createBackendStation, fetchBackendHealth, fetchCmsStations, normalizeStation } from "./api.js";
+import { createStation as createBackendStation, deleteStation as deleteBackendStation, fetchBackendHealth, fetchCmsStations, normalizeStation, updateStation as updateBackendStation } from "./api.js";
 import AdminLayout from "./components/layout/AdminLayout.jsx";
 import AnalyticsReports from "./features/analytics/AnalyticsReports.jsx";
 import Dashboard from "./features/dashboard/Dashboard.jsx";
@@ -182,7 +182,14 @@ function AppShell() {
     setStations((current) => [normalizeStation({ ...created, live_status: "offline" }), ...current]);
   }
 
-  function deleteStation(stationId) {
+  async function updateStation(stationId, payload) {
+    const updated = await updateBackendStation(stationId, payload, currentUser);
+    setStations((current) => current.map((station) => station.id === stationId ? normalizeStation({ ...updated, live_status: station.status }) : station));
+    return updated;
+  }
+
+  async function deleteStation(stationId) {
+    await deleteBackendStation(stationId, currentUser);
     setStations((current) => current.filter((station) => station.id !== stationId));
     if (location.pathname === `/stations/${stationId}`) {
       navigate("/stations");
@@ -207,8 +214,10 @@ function AppShell() {
         <Route
           element={
             <StationManager
+              currentUser={currentUser}
               onCreateStation={createStation}
               onDeleteStation={deleteStation}
+              onEditStation={updateStation}
               onOpenDetails={openDetails}
               stations={visibleStations}
             />

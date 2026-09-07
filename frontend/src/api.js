@@ -149,6 +149,7 @@ export function normalizeStation(row) {
     id: row.id,
     code: row.code,
     name: row.name,
+    address: row.address || "",
     region: row.region_name || row.address || (row.region_id ? `Khu vực ${row.region_id}` : "Chưa gán khu vực"),
     type: metadata.type || "Không khí xung quanh",
     qcvnStatus: liveStatus === "critical" ? "critical" : liveStatus === "warning" ? "warning" : "normal",
@@ -194,6 +195,30 @@ export async function createStation(payload, currentUser) {
     throw new Error(detail.detail || "Không thể tạo trạm");
   }
   return response.json();
+}
+
+export async function updateStation(stationId, payload, currentUser) {
+  const response = await fetch(`${API_BASE_URL}/api/stations/${stationId}`, {
+    method: "PUT",
+    headers: { ...userHeaders(currentUser), "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.detail || "Không thể cập nhật trạm");
+  }
+  return response.json();
+}
+
+export async function deleteStation(stationId, currentUser) {
+  const response = await fetch(`${API_BASE_URL}/api/stations/${stationId}`, {
+    method: "DELETE",
+    headers: userHeaders(currentUser),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.detail || "Không thể xóa trạm");
+  }
 }
 
 export async function testFtpConnection(payload, currentUser) {
