@@ -87,11 +87,13 @@ def _fetch_station_ftp_configs() -> list[dict]:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT station_id, host, port, username AS user,
-                       pgp_sym_decrypt(password_encrypted, %s) AS password,
-                       root_path, timeout_seconds
-                FROM station_ftp_configs
-                ORDER BY station_id
+                SELECT a.station_id, f.host, f.port, f.username AS user,
+                       pgp_sym_decrypt(f.password_encrypted, %s) AS password,
+                       a.root_path, f.timeout_seconds
+                FROM station_ftp_assignments a
+                JOIN ftp_servers f ON f.id = a.ftp_server_id
+                WHERE f.status = 'active'
+                ORDER BY a.station_id
                 """,
                 (FTP_CREDENTIALS_KEY,),
             )

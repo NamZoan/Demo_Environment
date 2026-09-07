@@ -68,6 +68,38 @@ async def ensure_runtime_schema(connection) -> None:
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             UNIQUE (station_id, remote_path)
         );
+        CREATE TABLE IF NOT EXISTS ftp_servers (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL DEFAULT 21 CHECK (port BETWEEN 1 AND 65535),
+            username TEXT NOT NULL,
+            password_encrypted BYTEA NOT NULL,
+            root_path TEXT NOT NULL DEFAULT '/data',
+            timeout_seconds INTEGER NOT NULL DEFAULT 5 CHECK (timeout_seconds BETWEEN 1 AND 120),
+            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+            legacy_station_id BIGINT UNIQUE REFERENCES stations(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        CREATE TABLE IF NOT EXISTS station_ftp_assignments (
+            station_id BIGINT PRIMARY KEY REFERENCES stations(id) ON DELETE CASCADE,
+            ftp_server_id BIGINT NOT NULL REFERENCES ftp_servers(id) ON DELETE CASCADE,
+            root_path TEXT NOT NULL DEFAULT '/data',
+            assigned_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS idx_station_ftp_assignments_server ON station_ftp_assignments (ftp_server_id);
+        INSERT INTO ftp_servers (name, host, port, username, password_encrypted, root_path, timeout_seconds, legacy_station_id)
+        SELECT COALESCE(s.code, 'FTP station ' || c.station_id::text), c.host, c.port, c.username,
+               c.password_encrypted, c.root_path, c.timeout_seconds, c.station_id
+        FROM station_ftp_configs c
+        LEFT JOIN stations s ON s.id = c.station_id
+        ON CONFLICT (legacy_station_id) DO NOTHING;
+        INSERT INTO station_ftp_assignments (station_id, ftp_server_id, root_path)
+        SELECT c.station_id, f.id, c.root_path
+        FROM station_ftp_configs c
+        JOIN ftp_servers f ON f.legacy_station_id = c.station_id
+        ON CONFLICT (station_id) DO NOTHING;
         CREATE INDEX IF NOT EXISTS idx_ftp_files_station_seen ON ftp_files (station_id, last_seen_at DESC);
         """
     )
@@ -624,39 +656,68 @@ async def update_station(connection, station_id: int, payload: dict, user: dict,
 
 
 async def save_station_ftp_config(connection, station_id: int, ftp_config: dict, encryption_key: str) -> None:
-    await connection.execute(
-        """
-        INSERT INTO station_ftp_configs
-            (station_id, host, port, username, password_encrypted, root_path, timeout_seconds)
-        VALUES ($1, $2, $3, $4, pgp_sym_encrypt($5, $6), $7, $8)
-        ON CONFLICT (station_id) DO UPDATE SET
-            host = EXCLUDED.host,
-            port = EXCLUDED.port,
-            username = EXCLUDED.username,
-            password_encrypted = EXCLUDED.password_encrypted,
-            root_path = EXCLUDED.root_path,
-            timeout_seconds = EXCLUDED.timeout_seconds,
-            updated_at = now()
-        """,
+    existing = await connection.fetchrow(
+        "SELECT ftp_server_id FROM station_ftp_assignments WHERE station_id = $1",
         station_id,
+    )
+    root_path = normalize_ftp_path(ftp_config.get("root_path", "/data"))
+    if existing:
+        await connection.execute(
+            """
+            UPDATE ftp_servers
+            SET name = COALESCE($2, name), host = $3, port = $4, username = $5,
+                password_encrypted = pgp_sym_encrypt($6, $7), root_path = $8,
+                timeout_seconds = $9, updated_at = now()
+            WHERE id = $1
+            """,
+            existing["ftp_server_id"],
+            ftp_config.get("name"),
+            ftp_config["host"],
+            ftp_config.get("port", 21),
+            ftp_config["user"],
+            ftp_config["password"],
+            encryption_key,
+            root_path,
+            ftp_config.get("timeout_seconds", 5),
+        )
+        await connection.execute(
+            "UPDATE station_ftp_assignments SET root_path = $2 WHERE station_id = $1",
+            station_id,
+            root_path,
+        )
+        return
+    row = await connection.fetchrow(
+        """
+        INSERT INTO ftp_servers (name, host, port, username, password_encrypted, root_path, timeout_seconds)
+        VALUES ($1, $2, $3, $4, pgp_sym_encrypt($5, $6), $7, $8)
+        RETURNING id
+        """,
+        ftp_config.get("name", f"FTP station {station_id}"),
         ftp_config["host"],
         ftp_config.get("port", 21),
         ftp_config["user"],
         ftp_config["password"],
         encryption_key,
-        normalize_ftp_path(ftp_config.get("root_path", "/data")),
+        root_path,
         ftp_config.get("timeout_seconds", 5),
+    )
+    await connection.execute(
+        "INSERT INTO station_ftp_assignments (station_id, ftp_server_id, root_path) VALUES ($1, $2, $3)",
+        station_id,
+        row["id"],
+        root_path,
     )
 
 
 async def fetch_station_ftp_config(connection, station_id: int, encryption_key: str) -> dict | None:
     row = await connection.fetchrow(
         """
-        SELECT host, port, username AS user,
-               pgp_sym_decrypt(password_encrypted, $2) AS password,
-               root_path, timeout_seconds
-        FROM station_ftp_configs
-        WHERE station_id = $1
+        SELECT f.host, f.port, f.username AS user,
+               pgp_sym_decrypt(f.password_encrypted, $2) AS password,
+               a.root_path, f.timeout_seconds
+        FROM station_ftp_assignments a
+        JOIN ftp_servers f ON f.id = a.ftp_server_id
+        WHERE a.station_id = $1 AND f.status = 'active'
         """,
         station_id,
         encryption_key,
@@ -665,27 +726,119 @@ async def fetch_station_ftp_config(connection, station_id: int, encryption_key: 
 
 
 async def fetch_ftp_configs(connection, user: dict) -> list[dict]:
-    region_filter = "" if "super_admin" in user.get("roles", []) else "AND s.region_id = ANY($1::bigint[])"
+    region_filter = "" if "super_admin" in user.get("roles", []) else "WHERE EXISTS (SELECT 1 FROM station_ftp_assignments xa JOIN stations xs ON xs.id = xa.station_id WHERE xa.ftp_server_id = f.id AND xs.region_id = ANY($1::bigint[]))"
     args = [] if not region_filter else [user.get("region_ids", [])]
     rows = await connection.fetch(
         f"""
-        SELECT c.station_id, s.code AS station_code, s.name AS station_name,
-               c.host, c.port, c.username AS user, c.root_path, c.timeout_seconds
-        FROM station_ftp_configs c
-        JOIN stations s ON s.id = c.station_id
-        WHERE TRUE {region_filter}
-        ORDER BY s.code
+        SELECT f.id, f.name, f.host, f.port, f.username AS user, f.root_path,
+               f.timeout_seconds, f.status,
+               COALESCE(array_agg(DISTINCT a.station_id) FILTER (WHERE a.station_id IS NOT NULL), ARRAY[]::bigint[]) AS station_ids,
+               COALESCE(jsonb_agg(DISTINCT jsonb_build_object('id', s.id, 'code', s.code, 'name', s.name)) FILTER (WHERE s.id IS NOT NULL), '[]'::jsonb) AS stations
+        FROM ftp_servers f
+        LEFT JOIN station_ftp_assignments a ON a.ftp_server_id = f.id
+        LEFT JOIN stations s ON s.id = a.station_id
+        {region_filter}
+        GROUP BY f.id
+        ORDER BY f.name
         """,
         *args,
     )
     return [dict(row) for row in rows]
 
 
+async def create_ftp_server(connection, payload: dict, user: dict, encryption_key: str) -> dict:
+    station_ids = sorted(set(payload.get("station_ids", [])))
+    await validate_ftp_station_assignments(connection, station_ids, user)
+    row = await connection.fetchrow(
+        """
+        INSERT INTO ftp_servers (name, host, port, username, password_encrypted, root_path, timeout_seconds)
+        VALUES ($1, $2, $3, $4, pgp_sym_encrypt($5, $6), $7, $8)
+        RETURNING id
+        """,
+        payload["name"],
+        payload["host"],
+        payload.get("port", 21),
+        payload["user"],
+        payload["password"],
+        encryption_key,
+        normalize_ftp_path(payload.get("root_path", "/data")),
+        payload.get("timeout_seconds", 5),
+    )
+    await replace_ftp_station_assignments(connection, row["id"], station_ids, payload.get("root_path", "/data"))
+    return await fetch_ftp_server(connection, row["id"], user)
+
+
+async def fetch_ftp_server(connection, ftp_id: int, user: dict) -> dict | None:
+    configs = await fetch_ftp_configs(connection, {"roles": ["super_admin"], "region_ids": []})
+    config = next((item for item in configs if item["id"] == ftp_id), None)
+    if config is None or "super_admin" in user.get("roles", []):
+        return config
+    visible = await fetch_ftp_configs(connection, user)
+    return next((item for item in visible if item["id"] == ftp_id), None)
+
+
+async def validate_ftp_station_assignments(connection, station_ids: list[int], user: dict) -> None:
+    if not station_ids:
+        return
+    rows = await connection.fetch("SELECT id, region_id FROM stations WHERE id = ANY($1::bigint[])", station_ids)
+    if len(rows) != len(station_ids):
+        raise ValueError("One or more stations do not exist")
+    if any(not can_modify_station(user, row["region_id"]) for row in rows):
+        raise PermissionError("User cannot assign FTP to one or more stations")
+
+
+async def replace_ftp_station_assignments(connection, ftp_id: int, station_ids: list[int], root_path: str) -> None:
+    await connection.execute("DELETE FROM station_ftp_assignments WHERE ftp_server_id = $1", ftp_id)
+    if station_ids:
+        await connection.executemany(
+            "INSERT INTO station_ftp_assignments (station_id, ftp_server_id, root_path) VALUES ($1, $2, $3) ON CONFLICT (station_id) DO UPDATE SET ftp_server_id = EXCLUDED.ftp_server_id, root_path = EXCLUDED.root_path",
+            [(station_id, ftp_id, normalize_ftp_path(root_path)) for station_id in station_ids],
+        )
+
+
+async def update_ftp_server(connection, ftp_id: int, payload: dict, user: dict, encryption_key: str) -> dict | None:
+    existing = await fetch_ftp_server(connection, ftp_id, {"roles": ["super_admin"], "region_ids": []})
+    if existing is None:
+        return None
+    station_ids = sorted(set(payload.get("station_ids", [])))
+    await validate_ftp_station_assignments(connection, station_ids, user)
+    password = payload.get("password")
+    if password:
+        await connection.execute(
+            """
+            UPDATE ftp_servers SET name = $2, host = $3, port = $4, username = $5,
+                password_encrypted = pgp_sym_encrypt($6, $7), root_path = $8,
+                timeout_seconds = $9, updated_at = now() WHERE id = $1
+            """,
+            ftp_id, payload["name"], payload["host"], payload.get("port", 21), payload["user"], password,
+            encryption_key, normalize_ftp_path(payload.get("root_path", "/data")), payload.get("timeout_seconds", 5),
+        )
+    else:
+        await connection.execute(
+            """
+            UPDATE ftp_servers SET name = $2, host = $3, port = $4, username = $5,
+                root_path = $6, timeout_seconds = $7, updated_at = now() WHERE id = $1
+            """,
+            ftp_id, payload["name"], payload["host"], payload.get("port", 21), payload["user"],
+            normalize_ftp_path(payload.get("root_path", "/data")), payload.get("timeout_seconds", 5),
+        )
+    await replace_ftp_station_assignments(connection, ftp_id, station_ids, payload.get("root_path", "/data"))
+    return await fetch_ftp_server(connection, ftp_id, user)
+
+
+async def delete_ftp_server(connection, ftp_id: int, user: dict) -> bool:
+    existing = await fetch_ftp_server(connection, ftp_id, user)
+    if existing is None:
+        return False
+    result = await connection.execute("DELETE FROM ftp_servers WHERE id = $1", ftp_id)
+    return result.endswith("1")
+
+
 async def delete_station_ftp_config(connection, station_id: int, user: dict) -> bool:
     station_region_id = await resolve_station_region_id(connection, station_id)
     if not can_modify_station(user, station_region_id):
         raise PermissionError("User cannot modify this station FTP configuration")
-    result = await connection.execute("DELETE FROM station_ftp_configs WHERE station_id = $1", station_id)
+    result = await connection.execute("DELETE FROM station_ftp_assignments WHERE station_id = $1", station_id)
     return result.endswith("1")
 
 

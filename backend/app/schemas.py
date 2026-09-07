@@ -32,16 +32,19 @@ class FtpConfigInput(FtpConnectionRequest):
 
 
 class FtpConfigCreate(FtpConnectionRequest):
-    station_id: int
+    name: str = Field(min_length=1, max_length=255)
+    station_ids: list[int] = Field(default_factory=list)
 
 
 class FtpConfigUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
     host: str = Field(min_length=1, max_length=255)
     port: int = Field(default=21, ge=1, le=65535)
     user: str = Field(min_length=1, max_length=255)
     password: str | None = Field(default=None, max_length=4096)
     root_path: str = "/data"
     timeout_seconds: int = Field(default=5, ge=1, le=120)
+    station_ids: list[int] = Field(default_factory=list)
 
 
 class StationCreate(BaseModel):
@@ -215,9 +218,11 @@ class FtpStatus(BaseModel):
 
 
 class FtpConfigResponse(BaseModel):
-    station_id: int
-    station_code: str
-    station_name: str
+    id: int
+    name: str
+    station_id: int | None = None
+    station_ids: list[int] = Field(default_factory=list)
+    stations: list[dict[str, Any]] = Field(default_factory=list)
     host: str
     port: int
     user: str

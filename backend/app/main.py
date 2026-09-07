@@ -27,6 +27,10 @@ from app.repository import (
     fetch_ftp_configs,
     delete_station_ftp_config,
     save_station_ftp_config,
+    create_ftp_server,
+    fetch_ftp_server,
+    update_ftp_server,
+    delete_ftp_server,
     fetch_ftp_file_index,
     fetch_stations_for_user,
     fetch_user_context,
@@ -298,48 +302,36 @@ async def ftp_configs(user: dict = Depends(current_user)) -> list[dict]:
 async def add_ftp_config(payload: FtpConfigCreate, user: dict = Depends(current_user)) -> dict:
     async with database.acquire() as connection:
         try:
-            station = await fetch_station_by_id(connection, payload.station_id)
-            if station is None:
-                raise HTTPException(status_code=404, detail="Station not found")
-            if not can_modify_station(user, station.get("region_id")):
-                raise HTTPException(status_code=403, detail="User cannot modify this station")
             async with connection.transaction():
-                await save_station_ftp_config(connection, payload.station_id, payload.model_dump(), settings.ftp_credentials_key)
-            configs = await fetch_ftp_configs(connection, {"roles": ["super_admin"], "region_ids": []})
-            return next(config for config in configs if config["station_id"] == payload.station_id)
+                return await create_ftp_server(connection, payload.model_dump(), user, settings.ftp_credentials_key)
         except asyncpg.UniqueViolationError as exc:
-            raise HTTPException(status_code=409, detail="FTP configuration already exists for this station") from exc
+            raise HTTPException(status_code=409, detail="FTP configuration already exists") from exc
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.put("/api/ftp/configs/{station_id}", response_model=FtpConfigResponse)
-async def edit_ftp_config(station_id: int, payload: FtpConfigUpdate, user: dict = Depends(current_user)) -> dict:
+@app.put("/api/ftp/configs/{ftp_id}", response_model=FtpConfigResponse)
+async def edit_ftp_config(ftp_id: int, payload: FtpConfigUpdate, user: dict = Depends(current_user)) -> dict:
     async with database.acquire() as connection:
-        existing = await fetch_station_ftp_config(connection, station_id, settings.ftp_credentials_key)
-        if existing is None:
-            raise HTTPException(status_code=404, detail="FTP configuration not found")
-        station = await fetch_station_by_id(connection, station_id)
-        if station is None or not can_modify_station(user, station.get("region_id")):
-            raise HTTPException(status_code=403, detail="User cannot modify this station")
-        merged = payload.model_dump()
-        merged["password"] = merged["password"] or existing["password"]
         try:
             async with connection.transaction():
-                await save_station_ftp_config(connection, station_id, merged, settings.ftp_credentials_key)
-            configs = await fetch_ftp_configs(connection, {"roles": ["super_admin"], "region_ids": []})
-            return next(config for config in configs if config["station_id"] == station_id)
+                updated = await update_ftp_server(connection, ftp_id, payload.model_dump(), user, settings.ftp_credentials_key)
+            if updated is None:
+                raise HTTPException(status_code=404, detail="FTP configuration not found")
+            return updated
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.delete("/api/ftp/configs/{station_id}", status_code=204)
-async def remove_ftp_config(station_id: int, user: dict = Depends(current_user)) -> Response:
+@app.delete("/api/ftp/configs/{ftp_id}", status_code=204)
+async def remove_ftp_config(ftp_id: int, user: dict = Depends(current_user)) -> Response:
     async with database.acquire() as connection:
         try:
-            deleted = await delete_station_ftp_config(connection, station_id, user)
-        except LookupError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            deleted = await delete_ftp_server(connection, ftp_id, user)
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
     if not deleted:

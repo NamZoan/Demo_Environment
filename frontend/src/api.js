@@ -222,8 +222,8 @@ export async function createFtpConfig(payload, currentUser) {
   return response.json();
 }
 
-export async function updateFtpConfig(stationId, payload, currentUser) {
-  const response = await fetch(`${API_BASE_URL}/api/ftp/configs/${stationId}`, {
+export async function updateFtpConfig(ftpId, payload, currentUser) {
+  const response = await fetch(`${API_BASE_URL}/api/ftp/configs/${ftpId}`, {
     method: "PUT",
     headers: { ...userHeaders(currentUser), "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -232,8 +232,8 @@ export async function updateFtpConfig(stationId, payload, currentUser) {
   return response.json();
 }
 
-export async function deleteFtpConfig(stationId, currentUser) {
-  const response = await fetch(`${API_BASE_URL}/api/ftp/configs/${stationId}`, {
+export async function deleteFtpConfig(ftpId, currentUser) {
+  const response = await fetch(`${API_BASE_URL}/api/ftp/configs/${ftpId}`, {
     method: "DELETE",
     headers: userHeaders(currentUser),
   });
