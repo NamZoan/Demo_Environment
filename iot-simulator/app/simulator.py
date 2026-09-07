@@ -17,6 +17,7 @@ CSV_COLUMNS = ["sensor_id", "timestamp", "temperature", "humidity", "wind_speed"
 
 @dataclass(frozen=True)
 class Settings:
+    sensor_start: int = int(os.getenv("SENSOR_START", "1"))
     sensor_count: int = int(os.getenv("SENSOR_COUNT", "100"))
     interval_seconds: int = int(os.getenv("INTERVAL_SECONDS", "60"))
     ftp_host: str = os.getenv("FTP_HOST", "ftp-server")
@@ -73,6 +74,10 @@ def build_local_filename(sensor_id: str, sampled_at: datetime) -> str:
 
 def remote_sensor_dir(remote_base_dir: str, sensor_id: str) -> str:
     return f"{remote_base_dir.rstrip('/')}/{sensor_id}"
+
+
+def build_sensor_ids(sensor_start: int, sensor_count: int) -> list[str]:
+    return [f"sensor_{number:03d}" for number in range(sensor_start, sensor_start + sensor_count)]
 
 
 def write_local_csv(outbox_dir: Path, sensor_id: str, sampled_at: datetime, content: str) -> Path:
@@ -139,7 +144,7 @@ async def run_sensor(sensor_id: str, settings: Settings) -> None:
 
 
 async def run_all_sensors(settings: Settings) -> None:
-    sensor_ids = [f"sensor_{number:03d}" for number in range(1, settings.sensor_count + 1)]
+    sensor_ids = build_sensor_ids(settings.sensor_start, settings.sensor_count)
     await asyncio.gather(*(run_sensor(sensor_id, settings) for sensor_id in sensor_ids))
 
 
