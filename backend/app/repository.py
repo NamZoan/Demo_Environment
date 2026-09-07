@@ -732,6 +732,23 @@ async def fetch_station_ftp_config(connection, station_id: int, encryption_key: 
     return dict(row) if row else None
 
 
+async def fetch_ftp_connection_settings(connection, ftp_id: int, user: dict, encryption_key: str) -> dict | None:
+    if await fetch_ftp_server(connection, ftp_id, user) is None:
+        return None
+    row = await connection.fetchrow(
+        """
+        SELECT f.host, f.port, f.username AS user,
+               pgp_sym_decrypt(f.password_encrypted, $2) AS password,
+               f.root_path, f.timeout_seconds
+        FROM ftp_servers f
+        WHERE f.id = $1 AND f.status = 'active'
+        """,
+        ftp_id,
+        encryption_key,
+    )
+    return dict(row) if row else None
+
+
 async def fetch_ftp_configs(connection, user: dict) -> list[dict]:
     region_filter = "" if "super_admin" in user.get("roles", []) else "WHERE EXISTS (SELECT 1 FROM station_ftp_assignments xa JOIN stations xs ON xs.id = xa.station_id WHERE xa.ftp_server_id = f.id AND xs.region_id = ANY($1::bigint[]))"
     args = [] if not region_filter else [user.get("region_ids", [])]
