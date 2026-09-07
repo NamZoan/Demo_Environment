@@ -9,6 +9,7 @@ import Dashboard from "./features/dashboard/Dashboard.jsx";
 import StationManager from "./features/stations/StationManager.jsx";
 import StationParameters from "./features/stations/StationParameters.jsx";
 import FtpManagement from "./features/ftp/FtpManagement.jsx";
+import QcvnManagement from "./features/qcvn/QcvnManagement.jsx";
 import RbacManagement from "./features/rbac/RbacManagement.jsx";
 import { createMockStations } from "./services/mockApi.js";
 import { resolveBackendStations } from "./services/stationState.js";
@@ -171,7 +172,7 @@ function AppShell() {
     );
   }, [globalSearch, stations]);
 
-  const alertCount = stations.filter((station) => station.status === "offline" || station.metrics.pm25 >= 80).length;
+  const alertCount = stations.filter((station) => station.qcvnStatus === "warning" || station.qcvnStatus === "critical").length;
 
   function openDetails(station) {
     navigate(`/stations/${station.id}`);
@@ -193,6 +194,14 @@ function AppShell() {
     setStations((current) => current.filter((station) => station.id !== stationId));
     if (location.pathname === `/stations/${stationId}`) {
       navigate("/stations");
+    }
+  }
+
+  async function refreshStations() {
+    const result = await fetchCmsStations(currentUser);
+    if (result.source === "backend") {
+      setStations(result.stations);
+      setDataSource("backend");
     }
   }
 
@@ -226,7 +235,7 @@ function AppShell() {
         />
         <Route element={<StationDetailRoute stations={stations} />} path="/stations/:stationId" />
         <Route element={<AnalyticsReports currentUser={currentUser} stations={stations} />} path="/data" />
-        <Route element={<PlaceholderPage description="Cấu hình ngưỡng, quy chuẩn, cấp cảnh báo và luồng xác nhận sự cố vượt QCVN." title="Cảnh báo QCVN" />} path="/alerts" />
+        <Route element={<QcvnManagement currentUser={currentUser} onStationsChanged={refreshStations} stations={stations} />} path="/alerts" />
         <Route element={<PlaceholderPage description="Hàng đợi kiểm duyệt dữ liệu tự động, loại bỏ bất thường và duyệt dữ liệu vào kho chính thức." title="Kiểm duyệt dữ liệu" />} path="/approval" />
         <Route element={<PlaceholderPage description="Theo dõi camera trạm, lịch lấy mẫu tự động và trạng thái lệnh điều khiển thiết bị." title="Camera & Lấy mẫu" />} path="/camera" />
         <Route element={<BackendDatabasePage backendHealth={backendHealth} dataSource={dataSource} stations={stations} />} path="/backend" />

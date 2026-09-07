@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 
 import app.main as main
+from app.schemas import QcvnConfigCreate, QcvnConfigUpdate
 
 
 class FakeAcquire:
@@ -18,6 +19,32 @@ class FakeAcquire:
 class FakeDatabase:
     def acquire(self):
         return FakeAcquire()
+
+
+class FakeTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+
+class FakeQcvnConnection:
+    def transaction(self):
+        return FakeTransaction()
+
+
+class FakeQcvnAcquire:
+    async def __aenter__(self):
+        return FakeQcvnConnection()
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+
+class FakeQcvnDatabase:
+    def acquire(self):
+        return FakeQcvnAcquire()
 
 
 @pytest.mark.parametrize(
@@ -59,3 +86,37 @@ def test_analytics_routes_return_404_for_missing_station(monkeypatch, route_name
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail == "Station not found"
+
+
+def test_add_qcvn_config_route_delegates_station_threshold_payload(monkeypatch):
+    payload = QcvnConfigCreate(station_id=7, metric="pm25", warning_max=35, critical_max=150)
+    expected = {"id": 1, "station_id": 7, "metric": "pm25", "warning_max": 35, "critical_max": 150}
+    captured = {}
+
+    async def fake_create(connection, data, user):
+        captured.update(data)
+        return expected
+
+    monkeypatch.setattr(main, "database", FakeQcvnDatabase())
+    monkeypatch.setattr(main, "create_qcvn_config", fake_create)
+
+    result = asyncio.run(main.add_qcvn_config(payload, {"id": 1, "roles": ["super_admin"], "region_ids": []}))
+
+    assert result == expected
+    assert captured["station_id"] == 7
+    assert captured["warning_max"] == 35.0
+
+
+def test_edit_qcvn_config_route_returns_not_found(monkeypatch):
+    payload = QcvnConfigUpdate(station_id=7, metric="pm25", warning_max=35, critical_max=150)
+
+    async def missing_update(*args):
+        return None
+
+    monkeypatch.setattr(main, "database", FakeQcvnDatabase())
+    monkeypatch.setattr(main, "update_qcvn_config", missing_update)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(main.edit_qcvn_config(999, payload, {"id": 1, "roles": ["super_admin"], "region_ids": []}))
+
+    assert exc_info.value.status_code == 404

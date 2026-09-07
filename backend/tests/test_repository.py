@@ -498,7 +498,7 @@ def test_classify_station_status_marks_stale_station_offline():
     assert status == "offline"
 
 
-def test_classify_station_status_marks_dangerous_pm25_critical():
+def test_classify_station_status_marks_dangerous_pm25_critical_with_qcvn_threshold():
     now = datetime(2026, 9, 5, 8, 0, tzinfo=timezone.utc)
 
     status = classify_station_status(
@@ -507,12 +507,13 @@ def test_classify_station_status_marks_dangerous_pm25_critical():
         humidity=70,
         last_seen_at=now - timedelta(minutes=1),
         now=now,
+        thresholds={"pm25": {"warning_max": 35.0, "critical_max": 150.0}},
     )
 
     assert status == "critical"
 
 
-def test_classify_station_status_marks_threshold_breach_warning():
+def test_classify_station_status_marks_threshold_breach_warning_with_qcvn_threshold():
     now = datetime(2026, 9, 5, 8, 0, tzinfo=timezone.utc)
 
     status = classify_station_status(
@@ -521,6 +522,10 @@ def test_classify_station_status_marks_threshold_breach_warning():
         humidity=70,
         last_seen_at=now - timedelta(minutes=1),
         now=now,
+        thresholds={
+            "pm25": {"warning_max": 35.0, "critical_max": 150.0},
+            "temperature": {"warning_max": 38.0, "critical_max": 42.0},
+        },
     )
 
     assert status == "warning"
@@ -570,7 +575,7 @@ class FakeLiveStationsConnection:
         return self.station_rows
 
 
-def test_fetch_live_stations_prefers_station_qcvn_config_over_region_config():
+def test_fetch_live_stations_uses_only_station_qcvn_config():
     now = datetime.now(timezone.utc)
     connection = FakeLiveStationsConnection(
         station_rows=[
@@ -636,8 +641,39 @@ def test_fetch_live_stations_prefers_station_qcvn_config_over_region_config():
     assert [query for query, _args in connection.fetch_calls if "FROM alert_configs" in query]
     assert stations[0]["live_status"] == "online"
     assert stations[0]["qcvn_thresholds"]["pm25"]["warning_max"] == 100.0
-    assert stations[1]["live_status"] == "warning"
-    assert stations[1]["qcvn_thresholds"]["pm25"]["warning_max"] == 60.0
+    assert stations[1]["live_status"] == "online"
+    assert stations[1]["qcvn_thresholds"] == {}
+
+
+def test_fetch_live_stations_does_not_alert_unconfigured_station():
+    now = datetime.now(timezone.utc)
+    connection = FakeLiveStationsConnection(
+        station_rows=[
+            {
+                "id": 3,
+                "code": "C",
+                "name": "Station C",
+                "latitude": 10.0,
+                "longitude": 106.0,
+                "address": "C",
+                "station_status": "active",
+                "metadata": {},
+                "region_id": 99,
+                "last_seen_at": now - timedelta(minutes=1),
+                "time": now - timedelta(minutes=1),
+                "temperature": 45.0,
+                "humidity": 99.0,
+                "wind_speed": 2.0,
+                "pm25": 180.0,
+            },
+        ],
+        config_rows=[],
+    )
+
+    stations = asyncio.run(fetch_live_stations(connection, {"roles": ["super_admin"], "region_ids": []}))
+
+    assert stations[0]["live_status"] == "online"
+    assert stations[0]["qcvn_thresholds"] == {}
 
 
 def test_manager_can_modify_station_only_inside_assigned_region():

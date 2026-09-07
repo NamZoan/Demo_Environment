@@ -37,9 +37,13 @@ from app.repository import (
     fetch_user_context,
     fetch_rbac_options,
     fetch_managed_users,
+    fetch_qcvn_configs,
     create_managed_user,
+    create_qcvn_config,
     update_managed_user,
+    update_qcvn_config,
     disable_managed_user,
+    delete_qcvn_config,
     require_user_management,
     update_station,
 )
@@ -62,6 +66,9 @@ from app.schemas import (
     FtpConfigCreate,
     FtpConfigUpdate,
     FtpConfigResponse,
+    QcvnConfigCreate,
+    QcvnConfigResponse,
+    QcvnConfigUpdate,
     RbacOptionsResponse,
     UserAdminResponse,
     UserCreate,
@@ -171,6 +178,58 @@ async def live_stations(user: dict = Depends(current_user)) -> list[dict]:
 async def overview(user: dict = Depends(current_user)) -> dict:
     async with database.acquire() as connection:
         return await fetch_overview(connection, user)
+
+
+@app.get("/api/qcvn/configs", response_model=list[QcvnConfigResponse])
+async def qcvn_configs(user: dict = Depends(current_user)) -> list[dict]:
+    async with database.acquire() as connection:
+        return await fetch_qcvn_configs(connection, user)
+
+
+@app.post("/api/qcvn/configs", response_model=QcvnConfigResponse, status_code=201)
+async def add_qcvn_config(payload: QcvnConfigCreate, user: dict = Depends(current_user)) -> dict:
+    async with database.acquire() as connection:
+        try:
+            async with connection.transaction():
+                return await create_qcvn_config(connection, payload.model_dump(), user)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/qcvn/configs/{config_id}", response_model=QcvnConfigResponse)
+async def edit_qcvn_config(config_id: int, payload: QcvnConfigUpdate, user: dict = Depends(current_user)) -> dict:
+    async with database.acquire() as connection:
+        try:
+            async with connection.transaction():
+                updated = await update_qcvn_config(connection, config_id, payload.model_dump(), user)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="QCVN configuration not found")
+    return updated
+
+
+@app.delete("/api/qcvn/configs/{config_id}", status_code=204)
+async def remove_qcvn_config(config_id: int, user: dict = Depends(current_user)) -> Response:
+    async with database.acquire() as connection:
+        try:
+            async with connection.transaction():
+                deleted = await delete_qcvn_config(connection, config_id, user)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail="QCVN configuration not found")
+    return Response(status_code=204)
 
 
 @app.get("/api/analytics/series", response_model=AnalyticsSeriesResponse)

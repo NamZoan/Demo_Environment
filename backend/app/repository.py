@@ -7,17 +7,6 @@ from app.ftp_browser import normalize_ftp_path
 
 
 STALE_AFTER = timedelta(minutes=30)
-WARNING_LIMITS = {"pm25": 35.0, "temperature": 38.0, "humidity": 85.0}
-CRITICAL_LIMITS = {"pm25": 150.0, "temperature": 42.0, "humidity": 95.0}
-DEFAULT_QCVN_THRESHOLDS = {
-    metric: {
-        "warning_min": None,
-        "warning_max": WARNING_LIMITS[metric],
-        "critical_min": None,
-        "critical_max": CRITICAL_LIMITS[metric],
-    }
-    for metric in WARNING_LIMITS
-}
 MAX_INTERACTIVE_POINTS_DEFAULT = 1000
 MIN_INTERACTIVE_POINTS = 100
 MAX_INTERACTIVE_POINTS = 5000
@@ -567,6 +556,178 @@ async def fetch_stations(connection) -> list[dict]:
         """
     )
     return [_station_row(row) for row in rows]
+
+
+def qcvn_config_row(row) -> dict:
+    return {
+        "id": row["id"],
+        "station_id": row["station_id"],
+        "station_code": row["station_code"],
+        "station_name": row["station_name"],
+        "metric": row["metric"],
+        "warning_min": row["warning_min"],
+        "warning_max": row["warning_max"],
+        "critical_min": row["critical_min"],
+        "critical_max": row["critical_max"],
+        "enabled": row["enabled"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+async def fetch_qcvn_configs(connection, user: dict) -> list[dict]:
+    args: list[Any] = []
+    region_filter = ""
+    if "super_admin" not in user.get("roles", []):
+        region_filter = "AND s.region_id = ANY($1::bigint[])"
+        args.append(user.get("region_ids", []))
+    rows = await connection.fetch(
+        f"""
+        SELECT
+            ac.id,
+            ac.station_id,
+            s.code AS station_code,
+            s.name AS station_name,
+            ac.metric,
+            ac.warning_min,
+            ac.warning_max,
+            ac.critical_min,
+            ac.critical_max,
+            ac.enabled,
+            ac.created_at,
+            ac.updated_at
+        FROM alert_configs ac
+        JOIN stations s ON s.id = ac.station_id
+        WHERE ac.station_id IS NOT NULL
+        {region_filter}
+        ORDER BY s.code, ac.metric
+        """,
+        *args,
+    )
+    return [qcvn_config_row(row) for row in rows]
+
+
+async def fetch_qcvn_config(connection, config_id: int) -> dict | None:
+    row = await connection.fetchrow(
+        """
+        SELECT
+            ac.id,
+            ac.station_id,
+            s.code AS station_code,
+            s.name AS station_name,
+            ac.metric,
+            ac.warning_min,
+            ac.warning_max,
+            ac.critical_min,
+            ac.critical_max,
+            ac.enabled,
+            ac.created_at,
+            ac.updated_at
+        FROM alert_configs ac
+        JOIN stations s ON s.id = ac.station_id
+        WHERE ac.id = $1 AND ac.station_id IS NOT NULL
+        """,
+        config_id,
+    )
+    return qcvn_config_row(row) if row else None
+
+
+async def qcvn_station_region_id(connection, station_id: int) -> int | None:
+    row = await connection.fetchrow("SELECT region_id FROM stations WHERE id = $1", station_id)
+    if row is None:
+        raise LookupError("Station not found")
+    return row["region_id"]
+
+
+def require_qcvn_station_access(user: dict, region_id: int | None) -> None:
+    if not can_modify_station(user, region_id):
+        raise PermissionError("You do not have permission to manage QCVN for this station")
+
+
+async def create_qcvn_config(connection, payload: dict, user: dict) -> dict:
+    station_id = payload["station_id"]
+    region_id = await qcvn_station_region_id(connection, station_id)
+    require_qcvn_station_access(user, region_id)
+    existing = await connection.fetchval(
+        "SELECT id FROM alert_configs WHERE station_id = $1 AND metric = $2",
+        station_id,
+        payload["metric"],
+    )
+    if existing is not None:
+        raise ValueError("QCVN configuration already exists for this station and metric")
+    row = await connection.fetchrow(
+        """
+        INSERT INTO alert_configs (
+            station_id, metric, warning_min, warning_max,
+            critical_min, critical_max, enabled, created_by
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING id
+        """,
+        station_id,
+        payload["metric"],
+        payload.get("warning_min"),
+        payload.get("warning_max"),
+        payload.get("critical_min"),
+        payload.get("critical_max"),
+        payload.get("enabled", True),
+        user.get("id"),
+    )
+    return await fetch_qcvn_config(connection, row["id"])
+
+
+async def update_qcvn_config(connection, config_id: int, payload: dict, user: dict) -> dict | None:
+    existing = await fetch_qcvn_config(connection, config_id)
+    if existing is None:
+        return None
+    current_region_id = await qcvn_station_region_id(connection, existing["station_id"])
+    require_qcvn_station_access(user, current_region_id)
+    target_region_id = await qcvn_station_region_id(connection, payload["station_id"])
+    require_qcvn_station_access(user, target_region_id)
+    duplicate = await connection.fetchval(
+        """
+        SELECT id FROM alert_configs
+        WHERE station_id = $1 AND metric = $2 AND id <> $3
+        """,
+        payload["station_id"],
+        payload["metric"],
+        config_id,
+    )
+    if duplicate is not None:
+        raise ValueError("QCVN configuration already exists for this station and metric")
+    await connection.execute(
+        """
+        UPDATE alert_configs
+        SET station_id = $2,
+            metric = $3,
+            warning_min = $4,
+            warning_max = $5,
+            critical_min = $6,
+            critical_max = $7,
+            enabled = $8,
+            updated_at = now()
+        WHERE id = $1
+        """,
+        config_id,
+        payload["station_id"],
+        payload["metric"],
+        payload.get("warning_min"),
+        payload.get("warning_max"),
+        payload.get("critical_min"),
+        payload.get("critical_max"),
+        payload.get("enabled", True),
+    )
+    return await fetch_qcvn_config(connection, config_id)
+
+
+async def delete_qcvn_config(connection, config_id: int, user: dict) -> bool:
+    existing = await fetch_qcvn_config(connection, config_id)
+    if existing is None:
+        return False
+    region_id = await qcvn_station_region_id(connection, existing["station_id"])
+    require_qcvn_station_access(user, region_id)
+    result = await connection.execute("DELETE FROM alert_configs WHERE id = $1", config_id)
+    return result.endswith("1")
 
 
 async def fetch_stations_for_user(connection, user: dict) -> list[dict]:
@@ -1154,12 +1315,11 @@ async def fetch_live_stations(connection, user: dict) -> list[dict]:
     )
     now = datetime.now(timezone.utc)
     thresholds = await fetch_live_station_qcvn_thresholds(connection, rows)
-    return [_live_station_row(row, now, thresholds.get(row["id"], DEFAULT_QCVN_THRESHOLDS)) for row in rows]
+    return [_live_station_row(row, now, thresholds.get(row["id"], {})) for row in rows]
 
 
 async def fetch_live_station_qcvn_thresholds(connection, station_rows) -> dict[int, dict[str, dict[str, float | None]]]:
     station_ids = [row["id"] for row in station_rows]
-    region_ids = sorted({row["region_id"] for row in station_rows if row["region_id"] is not None})
     if not station_ids:
         return {}
 
@@ -1169,30 +1329,20 @@ async def fetch_live_station_qcvn_thresholds(connection, station_rows) -> dict[i
         FROM alert_configs
         WHERE enabled = TRUE
           AND metric = ANY($1::text[])
-          AND (
-              station_id = ANY($2::bigint[])
-              OR (station_id IS NULL AND region_id = ANY($3::bigint[]))
-          )
+          AND station_id = ANY($2::bigint[])
         """,
         list(SENSOR_METRIC_COLUMNS.keys()),
         station_ids,
-        region_ids,
     )
     by_station: dict[int, dict[str, dict[str, float | None]]] = {}
-    by_region: dict[int, dict[str, dict[str, float | None]]] = {}
     for row in config_rows:
         threshold = qcvn_threshold_row(row)
         if row["station_id"] is not None:
             by_station.setdefault(row["station_id"], {})[row["metric"]] = threshold
-        elif row["region_id"] is not None:
-            by_region.setdefault(row["region_id"], {})[row["metric"]] = threshold
 
     thresholds: dict[int, dict[str, dict[str, float | None]]] = {}
     for row in station_rows:
-        station_thresholds = {metric: dict(threshold) for metric, threshold in DEFAULT_QCVN_THRESHOLDS.items()}
-        station_thresholds.update(by_region.get(row["region_id"], {}))
-        station_thresholds.update(by_station.get(row["id"], {}))
-        thresholds[row["id"]] = station_thresholds
+        thresholds[row["id"]] = by_station.get(row["id"], {})
     return thresholds
 
 
@@ -1291,7 +1441,7 @@ def classify_station_status(
         return "offline"
 
     values = {"pm25": pm25, "temperature": temperature, "humidity": humidity, "wind_speed": wind_speed}
-    thresholds = thresholds or DEFAULT_QCVN_THRESHOLDS
+    thresholds = thresholds or {}
     if any(is_threshold_breach(value, thresholds.get(metric), "critical") for metric, value in values.items()):
         return "critical"
     if any(is_threshold_breach(value, thresholds.get(metric), "warning") for metric, value in values.items()):

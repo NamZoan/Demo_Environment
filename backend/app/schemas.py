@@ -81,6 +81,28 @@ class LiveStation(Station):
     live_status: str
 
 
+class QcvnConfigCreate(BaseModel):
+    station_id: int = Field(gt=0)
+    metric: Literal["pm25", "temperature", "humidity"]
+    warning_min: float | None = None
+    warning_max: float | None = None
+    critical_min: float | None = None
+    critical_max: float | None = None
+    enabled: bool = True
+
+
+class QcvnConfigUpdate(QcvnConfigCreate):
+    pass
+
+
+class QcvnConfigResponse(QcvnConfigCreate):
+    id: int
+    station_code: str
+    station_name: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class SensorPoint(BaseModel):
     time: datetime
     temperature: float | None

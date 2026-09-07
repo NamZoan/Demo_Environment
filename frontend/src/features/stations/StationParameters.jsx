@@ -114,13 +114,11 @@ function parseCsvPreview(content) {
 }
 
 function thresholdFor(station, metric) {
-  return station.qcvnThresholds?.[metric.thresholdKey] || {
-    warning_max: metric.warning,
-    critical_max: metric.critical,
-  };
+  return station.qcvnThresholds?.[metric.thresholdKey] || null;
 }
 
 function exceedsThreshold(value, threshold, level) {
+  if (value == null || threshold == null) return false;
   const min = threshold[`${level}_min`];
   const max = threshold[`${level}_max`];
   return (min != null && value <= min) || (max != null && value >= max);
