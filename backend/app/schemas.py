@@ -50,8 +50,8 @@ class FtpConfigUpdate(BaseModel):
 class StationCreate(BaseModel):
     code: str
     name: str
-    latitude: float | None = None
-    longitude: float | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
     address: str | None = None
     status: str = "active"
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -62,8 +62,8 @@ class StationCreate(BaseModel):
 class StationUpdate(BaseModel):
     code: str | None = None
     name: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
     address: str | None = None
     status: str | None = None
     metadata: dict[str, Any] | None = None
