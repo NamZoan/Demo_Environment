@@ -19,7 +19,7 @@ def check_database(database_url: str, connect: Callable = psycopg.connect) -> No
 
 def main() -> int:
     try:
-        check_database(os.environ["DATABASE_URL"])
+        check_database(os.environ["DATABASE_URL"], connect=psycopg.connect)
     except Exception:
         print("Worker database healthcheck failed")
         return 1

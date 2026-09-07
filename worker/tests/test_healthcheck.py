@@ -46,3 +46,44 @@ def test_main_returns_failure_without_leaking_database_url(monkeypatch, capsys):
     assert "Worker database healthcheck failed" in output
     assert "secret" not in output
     assert "postgresql://" not in output
+
+
+def test_main_returns_success_and_uses_patched_connector(monkeypatch):
+    connection = _FakeConnection()
+    calls = []
+
+    def connect(url, **kwargs):
+        calls.append((url, kwargs))
+        return connection
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql://monitor:secret@db/environment")
+    monkeypatch.setattr(healthcheck.psycopg, "connect", connect)
+
+    assert healthcheck.main() == 0
+    assert calls == [("postgresql://monitor:secret@db/environment", {"connect_timeout": 3})]
+
+
+def test_check_database_forwards_short_connect_timeout():
+    connection = _FakeConnection()
+    calls = []
+
+    def connect(url, **kwargs):
+        calls.append((url, kwargs))
+        return connection
+
+    healthcheck.check_database("postgresql://monitor:secret@db/environment", connect=connect)
+
+    assert calls == [("postgresql://monitor:secret@db/environment", {"connect_timeout": 3})]
+
+
+def test_check_database_preserves_existing_connect_timeout():
+    connection = _FakeConnection()
+    calls = []
+
+    def connect(url, **kwargs):
+        calls.append((url, kwargs))
+        return connection
+
+    healthcheck.check_database("postgresql://monitor:secret@db/environment?connect_timeout=9", connect=connect)
+
+    assert calls == [("postgresql://monitor:secret@db/environment?connect_timeout=9", {})]
