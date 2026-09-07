@@ -9,6 +9,7 @@ import Dashboard from "./features/dashboard/Dashboard.jsx";
 import StationManager from "./features/stations/StationManager.jsx";
 import StationParameters from "./features/stations/StationParameters.jsx";
 import FtpManagement from "./features/ftp/FtpManagement.jsx";
+import RbacManagement from "./features/rbac/RbacManagement.jsx";
 import { createMockStations } from "./services/mockApi.js";
 import { resolveBackendStations } from "./services/stationState.js";
 
@@ -222,7 +223,7 @@ function AppShell() {
         <Route element={<BackendDatabasePage backendHealth={backendHealth} dataSource={dataSource} stations={stations} />} path="/backend" />
         <Route element={<PlaceholderPage description="Quản lý datalogger, FTP/MQTT, QCVN, thông số và kết nối liên thông." title="Cấu hình hệ thống" />} path="/settings" />
         <Route element={<FtpManagement currentUser={currentUser} stations={stations} />} path="/ftp" />
-        <Route element={<PlaceholderPage description="Quản lý người dùng, vai trò, đơn vị và phạm vi dữ liệu theo khu vực." title="Phân quyền" />} path="/rbac" />
+        <Route element={<RbacManagement currentUser={currentUser} />} path="/rbac" />
         <Route element={<Navigate replace to="/dashboard" />} path="*" />
       </Routes>
     </AdminLayout>

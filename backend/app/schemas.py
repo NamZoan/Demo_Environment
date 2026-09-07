@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -148,6 +148,52 @@ class LoginResponse(BaseModel):
     role: str
     roles: list[str] = Field(default_factory=list)
     region_ids: list[int] = Field(default_factory=list)
+
+
+RBACRole = Literal["super_admin", "manager", "viewer"]
+
+
+class UserCreate(BaseModel):
+    username: str = Field(min_length=3, max_length=100)
+    password: str = Field(min_length=8, max_length=4096)
+    full_name: str = Field(default="", max_length=255)
+    role: RBACRole = "viewer"
+    region_ids: list[int] = Field(default_factory=list)
+
+
+class UserUpdate(BaseModel):
+    password: str | None = Field(default=None, min_length=8, max_length=4096)
+    full_name: str = Field(default="", max_length=255)
+    role: RBACRole = "viewer"
+    status: Literal["active", "inactive"] = "active"
+    region_ids: list[int] = Field(default_factory=list)
+
+
+class UserAdminResponse(BaseModel):
+    id: int
+    username: str
+    full_name: str | None
+    role: str
+    roles: list[str] = Field(default_factory=list)
+    status: str
+    region_ids: list[int] = Field(default_factory=list)
+
+
+class RbacRoleResponse(BaseModel):
+    code: str
+    name: str
+    description: str | None = None
+
+
+class RegionResponse(BaseModel):
+    id: int
+    code: str
+    name: str
+
+
+class RbacOptionsResponse(BaseModel):
+    roles: list[RbacRoleResponse]
+    regions: list[RegionResponse]
 
 
 class Overview(BaseModel):

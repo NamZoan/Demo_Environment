@@ -30,6 +30,12 @@ from app.repository import (
     fetch_ftp_file_index,
     fetch_stations_for_user,
     fetch_user_context,
+    fetch_rbac_options,
+    fetch_managed_users,
+    create_managed_user,
+    update_managed_user,
+    disable_managed_user,
+    require_user_management,
     update_station,
 )
 from app.schemas import (
@@ -51,6 +57,10 @@ from app.schemas import (
     FtpConfigCreate,
     FtpConfigUpdate,
     FtpConfigResponse,
+    RbacOptionsResponse,
+    UserAdminResponse,
+    UserCreate,
+    UserUpdate,
 )
 
 
@@ -85,6 +95,8 @@ async def health() -> dict[str, str]:
 async def current_user(x_user_id: int = Header(1, alias="X-User-Id")) -> dict:
     async with database.acquire() as connection:
         context = await fetch_user_context(connection, x_user_id)
+    if context.get("status") != "active":
+        raise HTTPException(status_code=401, detail="User account is inactive or does not exist")
     return {"id": x_user_id, **context}
 
 
@@ -406,6 +418,80 @@ async def login(payload: LoginRequest) -> dict:
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     return user
+
+
+@app.get("/api/rbac/options", response_model=RbacOptionsResponse)
+async def rbac_options(user: dict = Depends(current_user)) -> dict:
+    try:
+        require_user_management(user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    async with database.acquire() as connection:
+        return await fetch_rbac_options(connection)
+
+
+@app.get("/api/rbac/users", response_model=list[UserAdminResponse])
+async def rbac_users(user: dict = Depends(current_user)) -> list[dict]:
+    try:
+        require_user_management(user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    async with database.acquire() as connection:
+        return await fetch_managed_users(connection)
+
+
+@app.post("/api/rbac/users", response_model=UserAdminResponse, status_code=201)
+async def add_rbac_user(payload: UserCreate, user: dict = Depends(current_user)) -> dict:
+    try:
+        require_user_management(user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    async with database.acquire() as connection:
+        try:
+            async with connection.transaction():
+                return await create_managed_user(connection, payload.model_dump())
+        except asyncpg.UniqueViolationError as exc:
+            raise HTTPException(status_code=409, detail="Username already exists") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/rbac/users/{user_id}", response_model=UserAdminResponse)
+async def edit_rbac_user(user_id: int, payload: UserUpdate, user: dict = Depends(current_user)) -> dict:
+    try:
+        require_user_management(user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    if user_id == user.get("id") and payload.status == "inactive":
+        raise HTTPException(status_code=400, detail="You cannot disable your own account")
+    async with database.acquire() as connection:
+        try:
+            async with connection.transaction():
+                updated = await update_managed_user(connection, user_id, payload.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return updated
+
+
+@app.delete("/api/rbac/users/{user_id}", status_code=204)
+async def disable_rbac_user(user_id: int, user: dict = Depends(current_user)) -> Response:
+    try:
+        require_user_management(user)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    async with database.acquire() as connection:
+        try:
+            async with connection.transaction():
+                disabled = await disable_managed_user(connection, user_id, user.get("id"))
+        except PermissionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not disabled:
+        raise HTTPException(status_code=404, detail="User not found")
+    return Response(status_code=204)
 
 
 @app.get("/api/stations/{station_id}/data", response_model=StationDataResponse)
