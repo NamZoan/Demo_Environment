@@ -1,5 +1,5 @@
 import { Database } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { createStation as createBackendStation, deleteStation as deleteBackendStation, fetchBackendHealth, fetchCmsStations, normalizeStation, updateStation as updateBackendStation } from "./api.js";
@@ -12,7 +12,7 @@ import FtpManagement from "./features/ftp/FtpManagement.jsx";
 import QcvnManagement from "./features/qcvn/QcvnManagement.jsx";
 import RbacManagement from "./features/rbac/RbacManagement.jsx";
 import { createMockStations } from "./services/mockApi.js";
-import { resolveBackendStations } from "./services/stationState.js";
+import { removeStationById } from "./services/stationState.js";
 
 const routeByPage = {
   dashboard: "/dashboard",
@@ -143,19 +143,23 @@ function AppShell() {
   const [stations, setStations] = useState(() => createMockStations());
   const [dataSource, setDataSource] = useState("mock");
   const [backendHealth, setBackendHealth] = useState({ ok: false, payload: {} });
+  const stationLoadId = useRef(0);
   const currentUser = useMemo(() => ({ id: 1 }), []);
+
+  async function loadStations() {
+    const requestId = ++stationLoadId.current;
+    const result = await fetchCmsStations(currentUser);
+    if (requestId !== stationLoadId.current || result.source !== "backend") return;
+    setStations(result.stations);
+    setDataSource("backend");
+  }
 
   useEffect(() => {
     let cancelled = false;
     fetchBackendHealth().then((health) => {
       if (!cancelled) setBackendHealth(health);
     });
-    fetchCmsStations(currentUser).then((result) => {
-      if (!cancelled && result.source === "backend") {
-        setStations(resolveBackendStations(result, stations));
-        setDataSource("backend");
-      }
-    });
+    loadStations();
     return () => {
       cancelled = true;
     };
@@ -191,18 +195,16 @@ function AppShell() {
 
   async function deleteStation(stationId) {
     await deleteBackendStation(stationId, currentUser);
-    setStations((current) => current.filter((station) => station.id !== stationId));
+    stationLoadId.current += 1;
+    setStations((current) => removeStationById(current, stationId));
+    await loadStations();
     if (location.pathname === `/stations/${stationId}`) {
       navigate("/stations");
     }
   }
 
   async function refreshStations() {
-    const result = await fetchCmsStations(currentUser);
-    if (result.source === "backend") {
-      setStations(result.stations);
-      setDataSource("backend");
-    }
+    await loadStations();
   }
 
   function navigatePage(pageId) {
