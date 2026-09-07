@@ -85,6 +85,43 @@ CREATE TABLE IF NOT EXISTS ftp_files (
 ALTER TABLE stations ADD COLUMN IF NOT EXISTS region_id BIGINT REFERENCES regions(id) ON DELETE SET NULL;
 ALTER TABLE stations ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 
+CREATE TABLE IF NOT EXISTS ftp_servers (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 21 CHECK (port BETWEEN 1 AND 65535),
+    username TEXT NOT NULL,
+    password_encrypted BYTEA NOT NULL,
+    root_path TEXT NOT NULL DEFAULT '/data',
+    timeout_seconds INTEGER NOT NULL DEFAULT 5 CHECK (timeout_seconds BETWEEN 1 AND 120),
+    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
+    legacy_station_id BIGINT UNIQUE REFERENCES stations(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS station_ftp_assignments (
+    station_id BIGINT PRIMARY KEY REFERENCES stations(id) ON DELETE CASCADE,
+    ftp_server_id BIGINT NOT NULL REFERENCES ftp_servers(id) ON DELETE CASCADE,
+    root_path TEXT NOT NULL DEFAULT '/data',
+    assigned_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_station_ftp_assignments_server ON station_ftp_assignments (ftp_server_id);
+
+INSERT INTO ftp_servers (name, host, port, username, password_encrypted, root_path, timeout_seconds, legacy_station_id)
+SELECT COALESCE(s.code, 'FTP station ' || c.station_id::text), c.host, c.port, c.username,
+       c.password_encrypted, c.root_path, c.timeout_seconds, c.station_id
+FROM station_ftp_configs c
+LEFT JOIN stations s ON s.id = c.station_id
+ON CONFLICT (legacy_station_id) DO NOTHING;
+
+INSERT INTO station_ftp_assignments (station_id, ftp_server_id, root_path)
+SELECT c.station_id, f.id, c.root_path
+FROM station_ftp_configs c
+JOIN ftp_servers f ON f.legacy_station_id = c.station_id
+ON CONFLICT (station_id) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS sensor_data (
     time TIMESTAMPTZ NOT NULL,
     station_id BIGINT NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
