@@ -205,8 +205,11 @@ export default function StationParameters({ onBack, station }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetchFtpStatus({ id: 1 }).then((status) => {
-      if (!cancelled) setFtpStatus(status);
+    fetchFtpStatus({ currentUser: { id: 1 }, stationId: station.id }).then((status) => {
+      if (!cancelled) {
+        setFtpStatus(status);
+        if (status.root_path) setFtpPath(status.root_path);
+      }
     });
     return () => {
       cancelled = true;
@@ -216,7 +219,7 @@ export default function StationParameters({ onBack, station }) {
   useEffect(() => {
     let cancelled = false;
     setFtpLoading(true);
-    fetchFtpFiles({ path: ftpPath, currentUser: { id: 1 } }).then((listing) => {
+    fetchFtpFiles({ path: ftpPath, stationId: station.id, currentUser: { id: 1 } }).then((listing) => {
       if (!cancelled) {
         setFtpListing(listing);
         setFtpLoading(false);
@@ -225,7 +228,7 @@ export default function StationParameters({ onBack, station }) {
     return () => {
       cancelled = true;
     };
-  }, [ftpPath, ftpRefreshKey]);
+  }, [ftpPath, ftpRefreshKey, station.id]);
 
   function openFtpEntry(entry) {
     if (entry.type === "folder") {
@@ -238,7 +241,7 @@ export default function StationParameters({ onBack, station }) {
       return;
     }
     setCsvLoading(true);
-    fetchFtpFile({ path: entry.path, currentUser: { id: 1 } }).then((preview) => {
+    fetchFtpFile({ path: entry.path, stationId: station.id, currentUser: { id: 1 } }).then((preview) => {
       setCsvPreview(preview);
       setCsvLoading(false);
     });

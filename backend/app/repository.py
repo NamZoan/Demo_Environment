@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 from math import ceil
 from typing import Any
 
+from app.ftp_browser import normalize_ftp_path
+
 
 STALE_AFTER = timedelta(minutes=30)
 WARNING_LIMITS = {"pm25": 35.0, "temperature": 38.0, "humidity": 85.0}
@@ -38,6 +40,17 @@ async def ensure_runtime_schema(connection) -> None:
         """
         ALTER TABLE sensor_data ADD COLUMN IF NOT EXISTS wind_speed DOUBLE PRECISION;
         ALTER TABLE latest_station_readings ADD COLUMN IF NOT EXISTS wind_speed DOUBLE PRECISION;
+        CREATE TABLE IF NOT EXISTS station_ftp_configs (
+            station_id BIGINT PRIMARY KEY REFERENCES stations(id) ON DELETE CASCADE,
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL DEFAULT 21 CHECK (port BETWEEN 1 AND 65535),
+            username TEXT NOT NULL,
+            password_encrypted BYTEA NOT NULL,
+            root_path TEXT NOT NULL DEFAULT '/data',
+            timeout_seconds INTEGER NOT NULL DEFAULT 5 CHECK (timeout_seconds BETWEEN 1 AND 120),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
         """
     )
 
@@ -319,7 +332,7 @@ async def fetch_station_by_id(connection, station_id: int) -> dict | None:
     return _station_row(row) if row else None
 
 
-async def create_station(connection, payload: dict, user: dict) -> dict:
+async def create_station(connection, payload: dict, user: dict, encryption_key: str) -> dict:
     if not can_modify_station(user, payload.get("region_id")):
         raise PermissionError("User cannot create stations in this region")
     row = await connection.fetchrow(
@@ -338,11 +351,13 @@ async def create_station(connection, payload: dict, user: dict) -> dict:
         payload.get("region_id"),
     )
     station = _station_row(row)
+    if payload.get("ftp_config"):
+        await save_station_ftp_config(connection, station["id"], payload["ftp_config"], encryption_key)
     await insert_audit_log(connection, user["id"], "station.create", "station", station["id"], None, station)
     return station
 
 
-async def update_station(connection, station_id: int, payload: dict, user: dict) -> dict | None:
+async def update_station(connection, station_id: int, payload: dict, user: dict, encryption_key: str) -> dict | None:
     existing = await fetch_station_by_id(connection, station_id)
     if existing is None:
         return None
@@ -377,8 +392,51 @@ async def update_station(connection, station_id: int, payload: dict, user: dict)
         merged.get("region_id"),
     )
     station = _station_row(row)
+    if payload.get("ftp_config"):
+        await save_station_ftp_config(connection, station_id, payload["ftp_config"], encryption_key)
     await insert_audit_log(connection, user["id"], "station.update", "station", station_id, existing, station)
     return station
+
+
+async def save_station_ftp_config(connection, station_id: int, ftp_config: dict, encryption_key: str) -> None:
+    await connection.execute(
+        """
+        INSERT INTO station_ftp_configs
+            (station_id, host, port, username, password_encrypted, root_path, timeout_seconds)
+        VALUES ($1, $2, $3, $4, pgp_sym_encrypt($5, $6), $7, $8)
+        ON CONFLICT (station_id) DO UPDATE SET
+            host = EXCLUDED.host,
+            port = EXCLUDED.port,
+            username = EXCLUDED.username,
+            password_encrypted = EXCLUDED.password_encrypted,
+            root_path = EXCLUDED.root_path,
+            timeout_seconds = EXCLUDED.timeout_seconds,
+            updated_at = now()
+        """,
+        station_id,
+        ftp_config["host"],
+        ftp_config.get("port", 21),
+        ftp_config["user"],
+        ftp_config["password"],
+        encryption_key,
+        normalize_ftp_path(ftp_config.get("root_path", "/data")),
+        ftp_config.get("timeout_seconds", 5),
+    )
+
+
+async def fetch_station_ftp_config(connection, station_id: int, encryption_key: str) -> dict | None:
+    row = await connection.fetchrow(
+        """
+        SELECT host, port, username AS user,
+               pgp_sym_decrypt(password_encrypted, $2) AS password,
+               root_path, timeout_seconds
+        FROM station_ftp_configs
+        WHERE station_id = $1
+        """,
+        station_id,
+        encryption_key,
+    )
+    return dict(row) if row else None
 
 
 async def delete_station(connection, station_id: int, user: dict) -> bool:

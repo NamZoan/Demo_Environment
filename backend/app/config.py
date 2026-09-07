@@ -13,6 +13,7 @@ class Settings(BaseModel):
     ftp_user: str = os.getenv("FTP_USER", "station")
     ftp_password: str = os.getenv("FTP_PASSWORD", "stationpass")
     ftp_timeout_seconds: int = int(os.getenv("FTP_TIMEOUT_SECONDS", "5"))
+    ftp_credentials_key: str = os.getenv("FTP_CREDENTIALS_KEY", "development-only-change-me")
 
 
 settings = Settings()

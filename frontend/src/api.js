@@ -183,6 +183,29 @@ export async function fetchCmsStations(currentUser) {
   }
 }
 
+export async function createStation(payload, currentUser) {
+  const response = await fetch(`${API_BASE_URL}/api/stations`, {
+    method: "POST",
+    headers: { ...userHeaders(currentUser), "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.detail || "Không thể tạo trạm");
+  }
+  return response.json();
+}
+
+export async function testFtpConnection(payload, currentUser) {
+  const response = await fetch(`${API_BASE_URL}/api/ftp/test`, {
+    method: "POST",
+    headers: { ...userHeaders(currentUser), "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error("Không thể kiểm tra kết nối FTP");
+  return response.json();
+}
+
 function sortSimulatorStationsFirst(left, right) {
   const leftIsSensor = left.code.startsWith("sensor_");
   const rightIsSensor = right.code.startsWith("sensor_");
@@ -204,9 +227,10 @@ export async function fetchBackendHealth() {
   }
 }
 
-export async function fetchFtpStatus(currentUser) {
+export async function fetchFtpStatus({ currentUser, stationId } = {}) {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/ftp/status`, {
+    const params = stationId ? `?station_id=${encodeURIComponent(stationId)}` : "";
+    const response = await fetch(`${API_BASE_URL}/api/ftp/status${params}`, {
       headers: userHeaders(currentUser),
     });
     if (!response.ok) {
@@ -225,9 +249,9 @@ export async function fetchFtpStatus(currentUser) {
   }
 }
 
-export async function fetchFtpFiles({ path, currentUser }) {
+export async function fetchFtpFiles({ path, stationId, currentUser }) {
   try {
-    const params = new URLSearchParams({ path });
+    const params = new URLSearchParams({ ...(path ? { path } : {}), ...(stationId ? { station_id: String(stationId) } : {}) });
     const response = await fetch(`${API_BASE_URL}/api/ftp/files?${params}`, {
       headers: userHeaders(currentUser),
     });
@@ -244,9 +268,9 @@ export async function fetchFtpFiles({ path, currentUser }) {
   }
 }
 
-export async function fetchFtpFile({ path, currentUser }) {
+export async function fetchFtpFile({ path, stationId, currentUser }) {
   try {
-    const params = new URLSearchParams({ path });
+    const params = new URLSearchParams({ path, ...(stationId ? { station_id: String(stationId) } : {}) });
     const response = await fetch(`${API_BASE_URL}/api/ftp/file?${params}`, {
       headers: userHeaders(currentUser),
     });

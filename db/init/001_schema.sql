@@ -53,6 +53,18 @@ CREATE TABLE IF NOT EXISTS stations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS station_ftp_configs (
+    station_id BIGINT PRIMARY KEY REFERENCES stations(id) ON DELETE CASCADE,
+    host TEXT NOT NULL,
+    port INTEGER NOT NULL DEFAULT 21 CHECK (port BETWEEN 1 AND 65535),
+    username TEXT NOT NULL,
+    password_encrypted BYTEA NOT NULL,
+    root_path TEXT NOT NULL DEFAULT '/data',
+    timeout_seconds INTEGER NOT NULL DEFAULT 5 CHECK (timeout_seconds BETWEEN 1 AND 120),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 ALTER TABLE stations ADD COLUMN IF NOT EXISTS region_id BIGINT REFERENCES regions(id) ON DELETE SET NULL;
 ALTER TABLE stations ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 

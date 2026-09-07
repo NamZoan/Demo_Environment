@@ -2,13 +2,13 @@ import { Database } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
-import { fetchBackendHealth, fetchCmsStations } from "./api.js";
+import { createStation as createBackendStation, fetchBackendHealth, fetchCmsStations, normalizeStation } from "./api.js";
 import AdminLayout from "./components/layout/AdminLayout.jsx";
 import AnalyticsReports from "./features/analytics/AnalyticsReports.jsx";
 import Dashboard from "./features/dashboard/Dashboard.jsx";
 import StationManager from "./features/stations/StationManager.jsx";
 import StationParameters from "./features/stations/StationParameters.jsx";
-import { addStation, createMockStations } from "./services/mockApi.js";
+import { createMockStations } from "./services/mockApi.js";
 import { resolveBackendStations } from "./services/stationState.js";
 
 const routeByPage = {
@@ -173,8 +173,9 @@ function AppShell() {
     navigate(`/stations/${station.id}`);
   }
 
-  function createStation(payload) {
-    setStations((current) => addStation(current, payload));
+  async function createStation(payload) {
+    const created = await createBackendStation(payload, currentUser);
+    setStations((current) => [normalizeStation({ ...created, live_status: "offline" }), ...current]);
   }
 
   function deleteStation(stationId) {

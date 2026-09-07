@@ -140,7 +140,7 @@ export default function Dashboard({ dataSource, stations, onOpenStations }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetchFtpStatus({ id: 1 }).then((status) => {
+    fetchFtpStatus({ currentUser: { id: 1 } }).then((status) => {
       if (!cancelled) setFtpStatus(status);
     });
     fetchFtpFiles({ path: "/data", currentUser: { id: 1 } }).then((listing) => {

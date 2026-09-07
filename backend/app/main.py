@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import database
-from app.ftp_browser import FtpConnectionSettings, check_ftp_status, list_ftp_directory, read_ftp_csv_file
+from app.ftp_browser import FtpConnectionSettings, check_ftp_status, list_ftp_directory, normalize_ftp_path, read_ftp_csv_file
 from app.repository import (
     MAX_INTERACTIVE_POINTS_DEFAULT,
     authenticate_user,
@@ -21,6 +21,7 @@ from app.repository import (
     fetch_live_stations,
     fetch_overview,
     fetch_station_data,
+    fetch_station_ftp_config,
     fetch_stations_for_user,
     fetch_user_context,
     update_station,
@@ -40,6 +41,7 @@ from app.schemas import (
     StationCreate,
     StationDataResponse,
     StationUpdate,
+    FtpConnectionRequest,
 )
 
 
@@ -94,22 +96,28 @@ async def list_stations(user: dict = Depends(current_user)) -> list[dict]:
 async def add_station(payload: StationCreate, user: dict = Depends(current_user)) -> dict:
     async with database.acquire() as connection:
         try:
-            return await create_station(connection, payload.model_dump(), user)
+            async with connection.transaction():
+                return await create_station(connection, payload.model_dump(), user, settings.ftp_credentials_key)
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except asyncpg.UniqueViolationError as exc:
             raise HTTPException(status_code=409, detail="Station code already exists") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.put("/api/stations/{station_id}", response_model=Station)
 async def edit_station(station_id: int, payload: StationUpdate, user: dict = Depends(current_user)) -> dict:
     async with database.acquire() as connection:
         try:
-            station = await update_station(connection, station_id, payload.model_dump(exclude_unset=True), user)
+            async with connection.transaction():
+                station = await update_station(connection, station_id, payload.model_dump(exclude_unset=True), user, settings.ftp_credentials_key)
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
         except asyncpg.UniqueViolationError as exc:
             raise HTTPException(status_code=409, detail="Station code already exists") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     if station is None:
         raise HTTPException(status_code=404, detail="Station not found")
     return station
@@ -230,25 +238,67 @@ def ftp_settings() -> FtpConnectionSettings:
     )
 
 
-@app.get("/api/ftp/status", response_model=FtpStatus)
-async def ftp_status(user: dict = Depends(current_user)) -> dict:
+async def station_ftp_settings(station_id: int, connection) -> FtpConnectionSettings:
+    config = await fetch_station_ftp_config(connection, station_id, settings.ftp_credentials_key)
+    if config is None:
+        raise HTTPException(status_code=404, detail="FTP configuration is not set for this station")
+    return FtpConnectionSettings(**config)
+
+
+@app.post("/api/ftp/test", response_model=FtpStatus)
+async def test_ftp_connection(payload: FtpConnectionRequest, user: dict = Depends(current_user)) -> dict:
     try:
-        return await asyncio.to_thread(check_ftp_status, ftp_settings())
+        ftp_config = payload.model_dump()
+        ftp_config["root_path"] = normalize_ftp_path(payload.root_path)
+        result = await asyncio.to_thread(check_ftp_status, FtpConnectionSettings(**ftp_config))
+        result["root_path"] = ftp_config["root_path"]
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        ftp_config = payload.model_dump()
+        return {
+            "connected": False,
+            "host": payload.host,
+            "port": payload.port,
+            "user": payload.user,
+            "root_path": ftp_config.get("root_path", payload.root_path),
+            "error": str(exc),
+        }
+
+
+@app.get("/api/ftp/status", response_model=FtpStatus)
+async def ftp_status(station_id: int | None = Query(None), user: dict = Depends(current_user)) -> dict:
+    connection_settings = ftp_settings()
+    root_path = "/data"
+    if station_id is not None:
+        async with database.acquire() as connection:
+            connection_settings = await station_ftp_settings(station_id, connection)
+        root_path = connection_settings.root_path if hasattr(connection_settings, "root_path") else root_path
+    try:
+        result = await asyncio.to_thread(check_ftp_status, connection_settings)
+        result["root_path"] = root_path
+        return result
     except Exception as exc:
         return {
             "connected": False,
-            "host": settings.ftp_host,
-            "port": settings.ftp_port,
-            "user": settings.ftp_user,
-            "root_path": "/data",
+            "host": connection_settings.host,
+            "port": connection_settings.port,
+            "user": connection_settings.user,
+            "root_path": root_path,
             "error": str(exc),
         }
 
 
 @app.get("/api/ftp/files", response_model=FtpListing)
-async def ftp_files(path: str = Query("/data"), user: dict = Depends(current_user)) -> dict:
+async def ftp_files(path: str | None = Query(None), station_id: int | None = Query(None), user: dict = Depends(current_user)) -> dict:
+    connection_settings = ftp_settings()
+    if station_id is not None:
+        async with database.acquire() as connection:
+            connection_settings = await station_ftp_settings(station_id, connection)
+    path = path or (getattr(connection_settings, "root_path", "/data"))
     try:
-        return await asyncio.to_thread(list_ftp_directory, ftp_settings(), path)
+        return await asyncio.to_thread(list_ftp_directory, connection_settings, path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -256,9 +306,13 @@ async def ftp_files(path: str = Query("/data"), user: dict = Depends(current_use
 
 
 @app.get("/api/ftp/file", response_model=FtpFilePreview)
-async def ftp_file(path: str = Query(...), user: dict = Depends(current_user)) -> dict:
+async def ftp_file(path: str = Query(...), station_id: int | None = Query(None), user: dict = Depends(current_user)) -> dict:
+    connection_settings = ftp_settings()
+    if station_id is not None:
+        async with database.acquire() as connection:
+            connection_settings = await station_ftp_settings(station_id, connection)
     try:
-        return await asyncio.to_thread(read_ftp_csv_file, ftp_settings(), path)
+        return await asyncio.to_thread(read_ftp_csv_file, connection_settings, path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

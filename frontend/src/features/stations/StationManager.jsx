@@ -9,6 +9,7 @@ import { Edit2, MapPin, Plus, Trash2, X } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import CoordinatePicker from "../../components/map/CoordinatePicker.jsx";
+import { testFtpConnection } from "../../api.js";
 
 const statusOptions = [
   { value: "all", label: "Tất cả trạng thái" },
@@ -24,11 +25,13 @@ const statusStyles = {
 };
 
 const initialForm = {
+  code: "",
   name: "",
   region: "Ha Noi",
   type: "Không khí xung quanh",
   latitude: 21.0278,
   longitude: 105.8342,
+  ftp_config: { host: "127.0.0.1", port: 21, user: "station", password: "", root_path: "/data", timeout_seconds: 5 },
 };
 
 export default function StationManager({ onCreateStation, onDeleteStation, onOpenDetails, stations }) {
@@ -36,6 +39,9 @@ export default function StationManager({ onCreateStation, onDeleteStation, onOpe
   const [statusFilter, setStatusFilter] = useState("all");
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState(initialForm);
+  const [ftpTest, setFtpTest] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
 
   const filteredStations = useMemo(() => {
     const normalized = search.trim().toLowerCase();
@@ -127,11 +133,37 @@ export default function StationManager({ onCreateStation, onDeleteStation, onOpe
     initialState: { pagination: { pageSize: 12 } },
   });
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
-    onCreateStation(form);
-    setModalOpen(false);
-    setForm(initialForm);
+    setSaving(true);
+    setFormError("");
+    try {
+      await onCreateStation({
+        code: form.code.trim(),
+        name: form.name.trim(),
+        latitude: form.latitude,
+        longitude: form.longitude,
+        status: "active",
+        metadata: { type: form.type },
+        ftp_config: form.ftp_config,
+      });
+      setModalOpen(false);
+      setForm(initialForm);
+      setFtpTest(null);
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleFtpTest() {
+    setFtpTest({ loading: true });
+    try {
+      setFtpTest(await testFtpConnection(form.ftp_config, { id: 1 }));
+    } catch (error) {
+      setFtpTest({ connected: false, error: error.message });
+    }
   }
 
   return (
@@ -238,6 +270,10 @@ export default function StationManager({ onCreateStation, onDeleteStation, onOpe
             </div>
             <div className="grid gap-4 p-5 md:grid-cols-2">
               <label className="grid gap-1 text-sm">
+                Mã trạm
+                <input className="h-10 rounded-md border border-slate-300 px-3" onChange={(event) => setForm((current) => ({ ...current, code: event.target.value }))} required value={form.code} />
+              </label>
+              <label className="grid gap-1 text-sm">
                 Tên trạm
                 <input
                   className="h-10 rounded-md border border-slate-300 px-3"
@@ -281,13 +317,29 @@ export default function StationManager({ onCreateStation, onDeleteStation, onOpe
                   Lat {form.latitude}, Lng {form.longitude}
                 </p>
               </div>
+              <fieldset className="space-y-3 rounded-md border border-slate-200 p-4 md:col-span-2">
+                <legend className="px-1 text-sm font-semibold text-slate-800">FTP riêng của trạm</legend>
+                <div className="grid gap-3 md:grid-cols-[1fr_100px_1fr]">
+                  <label className="grid gap-1 text-sm">Host<input className="h-10 rounded-md border border-slate-300 px-3" onChange={(event) => setForm((current) => ({ ...current, ftp_config: { ...current.ftp_config, host: event.target.value } }))} required value={form.ftp_config.host} /></label>
+                  <label className="grid gap-1 text-sm">Port<input className="h-10 rounded-md border border-slate-300 px-3" min="1" max="65535" onChange={(event) => setForm((current) => ({ ...current, ftp_config: { ...current.ftp_config, port: Number(event.target.value) } }))} required type="number" value={form.ftp_config.port} /></label>
+                  <label className="grid gap-1 text-sm">User<input className="h-10 rounded-md border border-slate-300 px-3" onChange={(event) => setForm((current) => ({ ...current, ftp_config: { ...current.ftp_config, user: event.target.value } }))} required value={form.ftp_config.user} /></label>
+                  <label className="grid gap-1 text-sm">Mật khẩu<input className="h-10 rounded-md border border-slate-300 px-3" onChange={(event) => setForm((current) => ({ ...current, ftp_config: { ...current.ftp_config, password: event.target.value } }))} required type="password" value={form.ftp_config.password} /></label>
+                  <label className="grid gap-1 text-sm md:col-span-2">Thư mục gốc<input className="h-10 rounded-md border border-slate-300 px-3" onChange={(event) => setForm((current) => ({ ...current, ftp_config: { ...current.ftp_config, root_path: event.target.value } }))} required value={form.ftp_config.root_path} /></label>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button className="rounded-md border border-cyan-700 px-3 py-2 text-sm font-semibold text-cyan-700 disabled:opacity-50" disabled={ftpTest?.loading} onClick={handleFtpTest} type="button">{ftpTest?.loading ? "Đang kiểm tra..." : "Test kết nối FTP"}</button>
+                  {ftpTest?.connected && <span className="text-sm font-semibold text-emerald-700">Kết nối thành công</span>}
+                  {ftpTest?.error && <span className="text-sm text-red-700">{ftpTest.error}</span>}
+                </div>
+              </fieldset>
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+              {formError && <p className="mr-auto self-center text-sm text-red-700">{formError}</p>}
               <button className="rounded-md border border-slate-300 px-4 py-2" onClick={() => setModalOpen(false)} type="button">
                   Hủy
               </button>
-              <button className="rounded-md bg-cyan-700 px-4 py-2 font-semibold text-white" type="submit">
-                Lưu trạm
+              <button className="rounded-md bg-cyan-700 px-4 py-2 font-semibold text-white disabled:opacity-50" disabled={saving} type="submit">
+                {saving ? "Đang lưu..." : "Lưu trạm"}
               </button>
             </div>
           </form>

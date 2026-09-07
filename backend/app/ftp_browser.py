@@ -17,6 +17,7 @@ class FtpConnectionSettings:
     user: str
     password: str
     timeout_seconds: int
+    root_path: str = FTP_ROOT
 
 
 def normalize_ftp_path(path: str | None) -> str:
@@ -49,7 +50,7 @@ def check_ftp_status(settings: FtpConnectionSettings) -> dict:
             "host": settings.host,
             "port": settings.port,
             "user": settings.user,
-            "root_path": FTP_ROOT,
+            "root_path": settings.root_path,
             "message": welcome,
         }
 

@@ -15,6 +15,20 @@ class Station(BaseModel):
     metadata: dict[str, Any]
     region_id: int | None = None
     last_seen_at: datetime | None = None
+    ftp_config: dict[str, Any] | None = None
+
+
+class FtpConnectionRequest(BaseModel):
+    host: str = Field(min_length=1, max_length=255)
+    port: int = Field(default=21, ge=1, le=65535)
+    user: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=1, max_length=4096)
+    root_path: str = "/data"
+    timeout_seconds: int = Field(default=5, ge=1, le=120)
+
+
+class FtpConfigInput(FtpConnectionRequest):
+    pass
 
 
 class StationCreate(BaseModel):
@@ -26,6 +40,7 @@ class StationCreate(BaseModel):
     status: str = "active"
     metadata: dict[str, Any] = Field(default_factory=dict)
     region_id: int | None = None
+    ftp_config: FtpConfigInput | None = None
 
 
 class StationUpdate(BaseModel):
@@ -37,6 +52,7 @@ class StationUpdate(BaseModel):
     status: str | None = None
     metadata: dict[str, Any] | None = None
     region_id: int | None = None
+    ftp_config: FtpConfigInput | None = None
 
 
 class LiveStation(Station):

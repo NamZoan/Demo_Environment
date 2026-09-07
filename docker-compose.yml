@@ -21,6 +21,7 @@ services:
       context: ./backend
     environment:
       DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
+      FTP_CREDENTIALS_KEY: development-only-change-me
       CORS_ORIGINS: http://localhost:3000,http://localhost:5173
     ports:
       - "8000:8000"
@@ -48,6 +49,7 @@ services:
       context: ./worker
     environment:
       DATABASE_URL: postgresql://monitor:monitor@db:5432/environment
+      FTP_CREDENTIALS_KEY: development-only-change-me
       FTP_INCOMING_DIR: /ftp/data
       FTP_ARCHIVE_DIR: /ftp/archive
       FTP_ERROR_DIR: /ftp/error

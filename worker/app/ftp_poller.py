@@ -22,6 +22,7 @@ FTP_PASSWORD = os.getenv("FTP_PASSWORD", "stationpass")
 FTP_ROOT_DIR = os.getenv("FTP_ROOT_DIR", "/data")
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "5"))
 FTP_TIMEOUT_SECONDS = int(os.getenv("FTP_TIMEOUT_SECONDS", "10"))
+FTP_CREDENTIALS_KEY = os.getenv("FTP_CREDENTIALS_KEY", "development-only-change-me")
 
 
 def is_supported_data_file(path: str) -> bool:
@@ -44,26 +45,52 @@ def main() -> None:
 
 def process_once(processed_paths: set[str]) -> int:
     processed_count = 0
-    with _connect() as ftp:
-        for remote_path in _walk_files(ftp, FTP_ROOT_DIR):
-            if remote_path in processed_paths or not is_supported_data_file(remote_path):
-                continue
-            try:
-                inserted = _process_remote_file(ftp, remote_path)
-                processed_paths.add(remote_path)
-                processed_count += 1
-                logger.info("Processed %s with %s rows", remote_path, inserted)
-            except Exception:
-                logger.exception("Failed to process FTP file %s", remote_path)
+    configs = _fetch_station_ftp_configs()
+    if not configs:
+        configs = [{"station_id": None, "host": FTP_HOST, "port": FTP_PORT, "user": FTP_USER, "password": FTP_PASSWORD, "root_path": FTP_ROOT_DIR, "timeout_seconds": FTP_TIMEOUT_SECONDS}]
+    for config in configs:
+        try:
+            with _connect(config) as ftp:
+                for remote_path in _walk_files(ftp, config["root_path"]):
+                    processed_key = f'{config["station_id"]}:{remote_path}'
+                    if processed_key in processed_paths or not is_supported_data_file(remote_path):
+                        continue
+                    try:
+                        inserted = _process_remote_file(ftp, remote_path)
+                        processed_paths.add(processed_key)
+                        processed_count += 1
+                        logger.info("Processed station %s file %s with %s rows", config["station_id"] or "legacy", remote_path, inserted)
+                    except Exception:
+                        logger.exception("Failed to process station %s FTP file %s", config["station_id"], remote_path)
+        except Exception:
+            logger.exception("Failed to connect to station %s FTP", config["station_id"])
     return processed_count
 
 
-def _connect() -> FTP:
+def _connect(config: dict) -> FTP:
     ftp = FTP()
-    ftp.connect(FTP_HOST, FTP_PORT, timeout=FTP_TIMEOUT_SECONDS)
-    ftp.login(FTP_USER, FTP_PASSWORD)
+    ftp.connect(config["host"], config["port"], timeout=config["timeout_seconds"])
+    ftp.login(config["user"], config["password"])
     ftp.set_pasv(True)
     return ftp
+
+
+def _fetch_station_ftp_configs() -> list[dict]:
+    import psycopg
+
+    with psycopg.connect(DATABASE_URL) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT station_id, host, port, username AS user,
+                       pgp_sym_decrypt(password_encrypted, %s) AS password,
+                       root_path, timeout_seconds
+                FROM station_ftp_configs
+                ORDER BY station_id
+                """,
+                (FTP_CREDENTIALS_KEY,),
+            )
+            return [dict(zip(("station_id", "host", "port", "user", "password", "root_path", "timeout_seconds"), row)) for row in cursor.fetchall()]
 
 
 def _walk_files(ftp: FTP, root: str) -> list[str]:
