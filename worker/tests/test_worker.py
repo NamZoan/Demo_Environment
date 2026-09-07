@@ -94,3 +94,35 @@ def test_process_once_keeps_history_until_folder_is_assigned(monkeypatch, tmp_pa
 
     assert calls[0][0].station_code == "station-renamed"
     assert source.exists()
+
+
+def test_run_cycle_survives_database_failure_and_processes_after_recovery(monkeypatch, tmp_path):
+    incoming = tmp_path / "data"
+    source = incoming / "sensor_001" / "reading.csv"
+    source.parent.mkdir(parents=True)
+    source.write_text("unused", encoding="utf-8")
+    calls = []
+    outcomes = [TimeoutError("database unavailable"), {"/data/sensor_001": "station-renamed"}]
+
+    monkeypatch.setattr(worker, "FTP_INCOMING_DIR", incoming)
+    monkeypatch.setattr(worker, "FTP_ARCHIVE_DIR", tmp_path / "archive")
+    monkeypatch.setattr(worker, "FTP_ERROR_DIR", tmp_path / "error")
+    monkeypatch.setattr(worker, "ARCHIVE_PROCESSED_FILES", False)
+    monkeypatch.setattr(worker, "RETRY_ATTEMPTS", 1)
+    monkeypatch.setattr(worker, "fetch_folder_station_codes", lambda: _raise_or_return(outcomes))
+    monkeypatch.setattr(worker, "parse_sensor_file", lambda path: [_reading("sensor_001")])
+    monkeypatch.setattr(worker, "bulk_upsert_readings", lambda _url, readings: calls.append(readings) or 1)
+    worker.PROCESSED_FILE_SIGNATURES.clear()
+
+    worker.run_cycle()
+    worker.run_cycle()
+
+    assert len(calls) == 1
+    assert calls[0][0].station_code == "station-renamed"
+
+
+def _raise_or_return(outcomes):
+    outcome = outcomes.pop(0)
+    if isinstance(outcome, Exception):
+        raise outcome
+    return outcome

@@ -3,15 +3,18 @@ from __future__ import annotations
 import logging
 import os
 import posixpath
+import random
 import shutil
 import time
 from dataclasses import replace
 from pathlib import Path
+from typing import Callable
 
 import psycopg
 
 from app.db import bulk_upsert_readings
 from app.parser import parse_sensor_file
+from app.retry import retry_call
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -24,6 +27,9 @@ FTP_ERROR_DIR = Path(os.getenv("FTP_ERROR_DIR", "/ftp/error"))
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "5"))
 ARCHIVE_PROCESSED_FILES = os.getenv("ARCHIVE_PROCESSED_FILES", "true").lower() == "true"
 FTP_SERVER_ID = int(os.getenv("FTP_SERVER_ID", "0"))
+RETRY_ATTEMPTS = int(os.getenv("RETRY_ATTEMPTS", "3"))
+RETRY_INITIAL_DELAY_SECONDS = float(os.getenv("RETRY_INITIAL_DELAY_SECONDS", "1"))
+RETRY_MAX_DELAY_SECONDS = float(os.getenv("RETRY_MAX_DELAY_SECONDS", "30"))
 PROCESSED_FILE_SIGNATURES: set[tuple[str, int, int]] = set()
 
 
@@ -37,13 +43,31 @@ def main() -> None:
     FTP_ERROR_DIR.mkdir(parents=True, exist_ok=True)
 
     logger.info("FTP worker started. Watching %s", FTP_INCOMING_DIR)
+    run_forever()
+
+
+def run_forever(*, sleep: Callable[[float], None] = time.sleep) -> None:
     while True:
+        run_cycle()
+        sleep(POLL_SECONDS)
+
+
+def run_cycle() -> None:
+    try:
         process_once()
-        time.sleep(POLL_SECONDS)
+    except Exception:
+        logger.exception("Worker cycle failed")
 
 
 def process_once() -> None:
-    folder_station_codes = fetch_folder_station_codes()
+    folder_station_codes = retry_call(
+        fetch_folder_station_codes,
+        attempts=RETRY_ATTEMPTS,
+        initial_delay=RETRY_INITIAL_DELAY_SECONDS,
+        max_delay=RETRY_MAX_DELAY_SECONDS,
+        sleep=time.sleep,
+        random_value=random.random,
+    )
     for path in sorted(FTP_INCOMING_DIR.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in {".csv", ".json"}:
             continue
@@ -95,7 +119,7 @@ def fetch_folder_station_codes() -> dict[str, str]:
 
 
 def station_code_for_path(path: Path, folder_station_codes: dict[str, str]) -> str | None:
-    if not FTP_SERVER_ID:
+    if not FTP_SERVER_ID and not folder_station_codes:
         return None
     relative = path.relative_to(FTP_INCOMING_DIR)
     folder_path = posixpath.join("/data", relative.parent.as_posix())
