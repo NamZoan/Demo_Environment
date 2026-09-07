@@ -9,6 +9,7 @@ import Dashboard from "./features/dashboard/Dashboard.jsx";
 import StationManager from "./features/stations/StationManager.jsx";
 import StationParameters from "./features/stations/StationParameters.jsx";
 import { addStation, createMockStations } from "./services/mockApi.js";
+import { resolveBackendStations } from "./services/stationState.js";
 
 const routeByPage = {
   dashboard: "/dashboard",
@@ -145,8 +146,8 @@ function AppShell() {
       if (!cancelled) setBackendHealth(health);
     });
     fetchCmsStations(currentUser).then((result) => {
-      if (!cancelled && result.source === "backend" && result.stations.length > 0) {
-        setStations(result.stations);
+      if (!cancelled && result.source === "backend") {
+        setStations(resolveBackendStations(result, stations));
         setDataSource("backend");
       }
     });
