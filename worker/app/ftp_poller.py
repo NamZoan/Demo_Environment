@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import tempfile
 import time
 from ftplib import FTP, error_perm
@@ -10,6 +11,7 @@ from pathlib import Path
 from app.db import bulk_upsert_readings, upsert_ftp_file_index
 from app.ftp_index import build_file_index_rows
 from app.parser import parse_sensor_file
+from app.retry import retry_call
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -24,6 +26,10 @@ FTP_ROOT_DIR = os.getenv("FTP_ROOT_DIR", "/data")
 POLL_SECONDS = int(os.getenv("POLL_SECONDS", "5"))
 FTP_TIMEOUT_SECONDS = int(os.getenv("FTP_TIMEOUT_SECONDS", "10"))
 FTP_CREDENTIALS_KEY = os.getenv("FTP_CREDENTIALS_KEY", "development-only-change-me")
+RETRY_ATTEMPTS = int(os.getenv("RETRY_ATTEMPTS", "3"))
+RETRY_INITIAL_DELAY_SECONDS = float(os.getenv("RETRY_INITIAL_DELAY_SECONDS", "1"))
+RETRY_MAX_DELAY_SECONDS = float(os.getenv("RETRY_MAX_DELAY_SECONDS", "30"))
+RETRY_SLEEP = time.sleep
 
 
 def is_supported_data_file(path: str) -> bool:
@@ -46,15 +52,18 @@ def main() -> None:
 
 def process_once(processed_paths: set[str]) -> int:
     processed_count = 0
-    configs = _fetch_station_ftp_configs()
+    configs = _retry(_fetch_station_ftp_configs)
     if not configs:
         configs = [{"station_id": None, "host": FTP_HOST, "port": FTP_PORT, "user": FTP_USER, "password": FTP_PASSWORD, "root_path": FTP_ROOT_DIR, "timeout_seconds": FTP_TIMEOUT_SECONDS}]
     for config in configs:
         try:
-            with _connect(config) as ftp:
+            with _retry(lambda: _connect(config)) as ftp:
                 entries = _walk_files(ftp, config["root_path"])
                 if config["station_id"] is not None:
-                    upsert_ftp_file_index(DATABASE_URL, build_file_index_rows(config["station_id"], entries))
+                    try:
+                        _retry(lambda: upsert_ftp_file_index(DATABASE_URL, build_file_index_rows(config["station_id"], entries)))
+                    except Exception:
+                        logger.exception("Failed to index station %s FTP server %s", config["station_id"], config["host"])
                 for entry in entries:
                     remote_path = entry["path"]
                     processed_key = f'{config["station_id"]}:{remote_path}'
@@ -68,8 +77,19 @@ def process_once(processed_paths: set[str]) -> int:
                     except Exception:
                         logger.exception("Failed to process station %s FTP file %s", config["station_id"], remote_path)
         except Exception:
-            logger.exception("Failed to connect to station %s FTP", config["station_id"])
+            logger.exception("Failed to process station %s FTP server %s", config["station_id"], config["host"])
     return processed_count
+
+
+def _retry(operation):
+    return retry_call(
+        operation,
+        attempts=RETRY_ATTEMPTS,
+        initial_delay=RETRY_INITIAL_DELAY_SECONDS,
+        max_delay=RETRY_MAX_DELAY_SECONDS,
+        sleep=RETRY_SLEEP,
+        random_value=random.random,
+    )
 
 
 def _connect(config: dict) -> FTP:
@@ -160,10 +180,14 @@ def _is_directory(ftp: FTP, path: str) -> bool:
 def _process_remote_file(ftp: FTP, remote_path: str) -> int:
     with tempfile.TemporaryDirectory() as temp_dir:
         local_path = Path(temp_dir) / Path(remote_path).name
-        with local_path.open("wb") as file:
-            ftp.retrbinary(f"RETR {remote_path}", file.write)
+        _retry(lambda: _download_remote_file(ftp, remote_path, local_path))
         readings = parse_sensor_file(local_path)
-        return bulk_upsert_readings(DATABASE_URL, readings)
+        return _retry(lambda: bulk_upsert_readings(DATABASE_URL, readings))
+
+
+def _download_remote_file(ftp: FTP, remote_path: str, local_path: Path) -> None:
+    with local_path.open("wb") as file:
+        ftp.retrbinary(f"RETR {remote_path}", file.write)
 
 
 if __name__ == "__main__":
