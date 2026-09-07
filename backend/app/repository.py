@@ -139,6 +139,13 @@ def require_user_management(user: dict) -> None:
         raise PermissionError("Only super admins can manage users")
 
 
+def normalize_ftp_catalog_row(row: dict) -> dict:
+    result = dict(row)
+    if isinstance(result.get("stations"), str):
+        result["stations"] = json.loads(result["stations"])
+    return result
+
+
 def aqi_level(value: float | None) -> str:
     if value is None:
         return "unknown"
@@ -743,7 +750,7 @@ async def fetch_ftp_configs(connection, user: dict) -> list[dict]:
         """,
         *args,
     )
-    return [dict(row) for row in rows]
+    return [normalize_ftp_catalog_row(dict(row)) for row in rows]
 
 
 async def create_ftp_server(connection, payload: dict, user: dict, encryption_key: str) -> dict:
