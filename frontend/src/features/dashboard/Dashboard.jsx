@@ -1,7 +1,6 @@
 import {
   Activity,
   AlertTriangle,
-  BarChart3,
   Database,
   FileText,
   Gauge,
@@ -14,8 +13,6 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -43,12 +40,6 @@ const alertLabels = {
   normal: "Bình thường",
   warning: "Cảnh báo",
   critical: "Nghiêm trọng",
-};
-
-const rangeLabels = {
-  "1h": "1 giờ gần nhất",
-  "6h": "6 giờ gần nhất",
-  "24h": "24 giờ gần nhất",
 };
 
 const pieColors = {
@@ -85,23 +76,6 @@ function countBy(stations, selector) {
   }, {});
 }
 
-function buildTrend(stations, range) {
-  const points = range === "1h" ? 12 : range === "6h" ? 18 : 24;
-  const stepMinutes = range === "1h" ? 5 : range === "6h" ? 20 : 60;
-  const now = Date.now();
-  return Array.from({ length: points }, (_, index) => {
-    const timestamp = new Date(now - (points - index - 1) * stepMinutes * 60_000);
-    const wave = Math.sin(index / 3);
-    return {
-      time: timestamp.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }),
-      pm25: Number((average(stations, (station) => station.metrics.pm25) + wave * 8).toFixed(1)),
-      temperature: Number((average(stations, (station) => station.metrics.temperature) + wave * 1.6).toFixed(1)),
-      humidity: Number((average(stations, (station) => station.metrics.humidity) - wave * 3.5).toFixed(1)),
-      windSpeed: Number((average(stations, (station) => station.metrics.windSpeed) + Math.abs(wave) * 4).toFixed(1)),
-    };
-  });
-}
-
 function formatDateTime(value) {
   if (!value) return "-";
   return new Date(value).toLocaleString("vi-VN");
@@ -134,7 +108,6 @@ export default function Dashboard({ dataSource, stations, onOpenStations }) {
   const [statusFilter, setStatusFilter] = useState("all");
   const [alertFilter, setAlertFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [rangeFilter, setRangeFilter] = useState("6h");
   const [ftpStatus, setFtpStatus] = useState(null);
   const [ftpFolders, setFtpFolders] = useState(0);
 
@@ -191,7 +164,6 @@ export default function Dashboard({ dataSource, stations, onOpenStations }) {
     value,
   }));
   const typeData = Object.entries(countBy(filteredStations, (station) => station.type)).map(([name, value]) => ({ name, value }));
-  const trendData = buildTrend(filteredStations, rangeFilter);
   const topPm25 = [...filteredStations]
     .sort((left, right) => right.metrics.pm25 - left.metrics.pm25)
     .slice(0, 8)
@@ -257,16 +229,6 @@ export default function Dashboard({ dataSource, stations, onOpenStations }) {
               ))}
             </select>
           </label>
-          <label className="grid gap-1 text-sm font-medium text-slate-600">
-            Khoảng thời gian
-            <select className="h-10 rounded-md border border-slate-300 bg-white px-3" onChange={(event) => setRangeFilter(event.target.value)} value={rangeFilter}>
-              {Object.entries(rangeLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
       </div>
 
@@ -276,33 +238,7 @@ export default function Dashboard({ dataSource, stations, onOpenStations }) {
         ))}
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.3fr_.7fr]">
-        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-950">Xu hướng thông số môi trường</h2>
-              <p className="text-sm text-slate-500">Tổng hợp theo {rangeLabels[rangeFilter].toLowerCase()} từ các trạm đang được lọc.</p>
-            </div>
-            <BarChart3 className="h-5 w-5 text-cyan-700" />
-          </div>
-          <div className="h-[360px]">
-            <ResponsiveContainer height="100%" width="100%">
-              <AreaChart data={trendData} margin={{ bottom: 8, left: 0, right: 20, top: 10 }}>
-                <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
-                <XAxis dataKey="time" tick={{ fontSize: 12 }} />
-                <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Legend />
-                <Area dataKey="pm25" fill="#fef3c7" name="PM2.5" stroke="#d97706" type="monotone" />
-                <Area dataKey="temperature" fill="#fee2e2" name="Nhiệt độ" stroke="#dc2626" type="monotone" />
-                <Area dataKey="humidity" fill="#dbeafe" name="Độ ẩm" stroke="#2563eb" type="monotone" />
-                <Area dataKey="windSpeed" fill="#d1fae5" name="Tốc độ gió" stroke="#059669" type="monotone" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </section>
-
-        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <h2 className="text-lg font-semibold text-slate-950">Phân bổ trạng thái</h2>
           <div className="mt-4 h-[260px]">
             <ResponsiveContainer height="100%" width="100%">
@@ -331,8 +267,7 @@ export default function Dashboard({ dataSource, stations, onOpenStations }) {
               <strong>{counts.offline}</strong>
             </div>
           </div>
-        </section>
-      </div>
+      </section>
 
       <div className="grid gap-4 xl:grid-cols-3">
         <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm xl:col-span-2">
