@@ -51,6 +51,23 @@ async def ensure_runtime_schema(connection) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
+        CREATE TABLE IF NOT EXISTS ftp_files (
+            id BIGSERIAL PRIMARY KEY,
+            station_id BIGINT NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+            remote_path TEXT NOT NULL,
+            name TEXT NOT NULL,
+            entry_type TEXT NOT NULL CHECK (entry_type IN ('file', 'folder')),
+            size_bytes BIGINT,
+            modified_at TEXT,
+            status TEXT NOT NULL DEFAULT 'discovered',
+            error TEXT,
+            last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            processed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            UNIQUE (station_id, remote_path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_ftp_files_station_seen ON ftp_files (station_id, last_seen_at DESC);
         """
     )
 
@@ -437,6 +454,23 @@ async def fetch_station_ftp_config(connection, station_id: int, encryption_key: 
         encryption_key,
     )
     return dict(row) if row else None
+
+
+async def fetch_ftp_file_index(connection, station_id: int, user: dict) -> list[dict]:
+    station_region_id = await resolve_station_region_id(connection, station_id)
+    if not can_read_station(user, station_region_id):
+        raise PermissionError("Station is outside assigned regions")
+    rows = await connection.fetch(
+        """
+        SELECT name, remote_path AS path, entry_type AS type, size_bytes AS size, modified_at AS modified
+        FROM ftp_files
+        WHERE station_id = $1
+          AND last_seen_at >= now() - interval '24 hours'
+        ORDER BY (entry_type = 'folder') DESC, name
+        """,
+        station_id,
+    )
+    return [dict(row) for row in rows]
 
 
 async def delete_station(connection, station_id: int, user: dict) -> bool:

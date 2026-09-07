@@ -7,7 +7,8 @@ import time
 from ftplib import FTP, error_perm
 from pathlib import Path
 
-from app.db import bulk_upsert_readings
+from app.db import bulk_upsert_readings, upsert_ftp_file_index
+from app.ftp_index import build_file_index_rows
 from app.parser import parse_sensor_file
 
 
@@ -51,7 +52,11 @@ def process_once(processed_paths: set[str]) -> int:
     for config in configs:
         try:
             with _connect(config) as ftp:
-                for remote_path in _walk_files(ftp, config["root_path"]):
+                entries = _walk_files(ftp, config["root_path"])
+                if config["station_id"] is not None:
+                    upsert_ftp_file_index(DATABASE_URL, build_file_index_rows(config["station_id"], entries))
+                for entry in entries:
+                    remote_path = entry["path"]
                     processed_key = f'{config["station_id"]}:{remote_path}'
                     if processed_key in processed_paths or not is_supported_data_file(remote_path):
                         continue
@@ -93,8 +98,8 @@ def _fetch_station_ftp_configs() -> list[dict]:
             return [dict(zip(("station_id", "host", "port", "user", "password", "root_path", "timeout_seconds"), row)) for row in cursor.fetchall()]
 
 
-def _walk_files(ftp: FTP, root: str) -> list[str]:
-    paths: list[str] = []
+def _walk_files(ftp: FTP, root: str) -> list[dict]:
+    paths: list[dict] = []
     stack = [root]
     while stack:
         current = stack.pop()
@@ -102,7 +107,7 @@ def _walk_files(ftp: FTP, root: str) -> list[str]:
             if item["type"] == "folder":
                 stack.append(item["path"])
             else:
-                paths.append(item["path"])
+                paths.append(item)
     return sorted(paths)
 
 
@@ -119,7 +124,7 @@ def _list_dir_with_mlsd(ftp: FTP, path: str) -> list[dict[str, str]]:
         if name in {".", ".."}:
             continue
         child_path = f"{path.rstrip('/')}/{name}"
-        entries.append({"path": child_path, "type": "folder" if facts.get("type") == "dir" else "file"})
+        entries.append({"path": child_path, "type": "folder" if facts.get("type") == "dir" else "file", "size": _optional_int(facts.get("size")), "modified": facts.get("modify")})
     return entries
 
 
@@ -128,8 +133,15 @@ def _list_dir_with_nlst(ftp: FTP, path: str) -> list[dict[str, str]]:
     for child_path in ftp.nlst(path):
         if child_path.rstrip("/").endswith(("/.", "/..")):
             continue
-        entries.append({"path": child_path, "type": "folder" if _is_directory(ftp, child_path) else "file"})
+        entries.append({"path": child_path, "type": "folder" if _is_directory(ftp, child_path) else "file", "size": None, "modified": None})
     return entries
+
+
+def _optional_int(value: str | None) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def _is_directory(ftp: FTP, path: str) -> bool:

@@ -125,5 +125,32 @@ def bulk_upsert_readings(database_url: str, readings: list[SensorReading]) -> in
             return inserted
 
 
+def upsert_ftp_file_index(database_url: str, rows: list[dict]) -> None:
+    if not rows:
+        return
+    with psycopg.connect(database_url) as connection:
+        with connection.cursor() as cursor:
+            cursor.executemany(
+                """
+                INSERT INTO ftp_files
+                    (station_id, remote_path, name, entry_type, size_bytes, modified_at, last_seen_at, updated_at)
+                VALUES (%(station_id)s, %(remote_path)s, %(name)s, %(entry_type)s, %(size_bytes)s, %(modified_at)s, now(), now())
+                ON CONFLICT (station_id, remote_path) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    entry_type = EXCLUDED.entry_type,
+                    size_bytes = EXCLUDED.size_bytes,
+                    modified_at = EXCLUDED.modified_at,
+                    last_seen_at = now(),
+                    updated_at = now()
+                """,
+                rows,
+            )
+            station_id = rows[0]["station_id"]
+            cursor.execute(
+                "DELETE FROM ftp_files WHERE station_id = %s AND last_seen_at < now() - interval '24 hours'",
+                (station_id,),
+            )
+
+
 def _copy_value(value: float | None) -> str:
     return "\\N" if value is None else str(value)

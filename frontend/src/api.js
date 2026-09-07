@@ -268,6 +268,19 @@ export async function fetchFtpFiles({ path, stationId, currentUser }) {
   }
 }
 
+export async function fetchFtpIndex({ stationId, currentUser }) {
+  const params = new URLSearchParams({ station_id: String(stationId) });
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/ftp/index?${params}`, {
+      headers: userHeaders(currentUser),
+    });
+    if (!response.ok) throw new Error("Cannot load FTP file index");
+    return response.json();
+  } catch (error) {
+    return { path: "/data", entries: [], error: error.message };
+  }
+}
+
 export async function fetchFtpFile({ path, stationId, currentUser }) {
   try {
     const params = new URLSearchParams({ path, ...(stationId ? { station_id: String(stationId) } : {}) });

@@ -22,6 +22,7 @@ from app.repository import (
     fetch_overview,
     fetch_station_data,
     fetch_station_ftp_config,
+    fetch_ftp_file_index,
     fetch_stations_for_user,
     fetch_user_context,
     update_station,
@@ -303,6 +304,16 @@ async def ftp_files(path: str | None = Query(None), station_id: int | None = Que
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Cannot browse FTP directory: {exc}") from exc
+
+
+@app.get("/api/ftp/index", response_model=FtpListing)
+async def ftp_file_index(station_id: int = Query(...), user: dict = Depends(current_user)) -> dict:
+    async with database.acquire() as connection:
+        try:
+            entries = await fetch_ftp_file_index(connection, station_id, user)
+        except PermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"path": "/data", "entries": entries}
 
 
 @app.get("/api/ftp/file", response_model=FtpFilePreview)

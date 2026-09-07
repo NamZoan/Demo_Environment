@@ -26,7 +26,7 @@ import {
 } from "recharts";
 
 import { createMockSeries } from "../../services/mockApi.js";
-import { fetchFtpFile, fetchFtpFiles, fetchFtpStatus, fetchStationData } from "../../api.js";
+import { fetchFtpFile, fetchFtpFiles, fetchFtpIndex, fetchFtpStatus, fetchStationData } from "../../api.js";
 import { queryOptimizationNote, stationResolutionOptions } from "./stationTimeRange.js";
 
 const rangeOptions = [
@@ -85,6 +85,11 @@ function parentFtpPath(path) {
   const segments = path.split("/").filter(Boolean);
   segments.pop();
   return `/${segments.join("/") || "data"}`;
+}
+
+function directFtpChildren(entries, path) {
+  const prefix = `${path.replace(/\/$/, "")}/`;
+  return entries.filter((entry) => entry.path.startsWith(prefix) && !entry.path.slice(prefix.length).includes("/"));
 }
 
 function formatDateTime(value) {
@@ -219,7 +224,10 @@ export default function StationParameters({ onBack, station }) {
   useEffect(() => {
     let cancelled = false;
     setFtpLoading(true);
-    fetchFtpFiles({ path: ftpPath, stationId: station.id, currentUser: { id: 1 } }).then((listing) => {
+    fetchFtpIndex({ stationId: station.id, currentUser: { id: 1 } }).then((indexedListing) => {
+      if (indexedListing.entries.length > 0) return { ...indexedListing, path: ftpPath, entries: directFtpChildren(indexedListing.entries, ftpPath) };
+      return fetchFtpFiles({ path: ftpPath, stationId: station.id, currentUser: { id: 1 } });
+    }).then((listing) => {
       if (!cancelled) {
         setFtpListing(listing);
         setFtpLoading(false);

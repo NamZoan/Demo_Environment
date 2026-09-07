@@ -65,6 +65,23 @@ CREATE TABLE IF NOT EXISTS station_ftp_configs (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS ftp_files (
+    id BIGSERIAL PRIMARY KEY,
+    station_id BIGINT NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+    remote_path TEXT NOT NULL,
+    name TEXT NOT NULL,
+    entry_type TEXT NOT NULL CHECK (entry_type IN ('file', 'folder')),
+    size_bytes BIGINT,
+    modified_at TEXT,
+    status TEXT NOT NULL DEFAULT 'discovered',
+    error TEXT,
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    processed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (station_id, remote_path)
+);
+
 ALTER TABLE stations ADD COLUMN IF NOT EXISTS region_id BIGINT REFERENCES regions(id) ON DELETE SET NULL;
 ALTER TABLE stations ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
 
@@ -129,6 +146,7 @@ CREATE INDEX IF NOT EXISTS idx_sensor_data_time ON sensor_data (time DESC);
 CREATE INDEX IF NOT EXISTS idx_sensor_data_station_time ON sensor_data (station_id, time DESC);
 CREATE INDEX IF NOT EXISTS idx_stations_region ON stations (region_id);
 CREATE INDEX IF NOT EXISTS idx_stations_last_seen ON stations (last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ftp_files_station_seen ON ftp_files (station_id, last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alert_configs_station ON alert_configs (station_id) WHERE station_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_alert_configs_region ON alert_configs (region_id) WHERE region_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs (entity_type, entity_id, created_at DESC);
