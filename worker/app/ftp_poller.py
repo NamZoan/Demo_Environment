@@ -130,7 +130,7 @@ def _walk_files(ftp: FTP, root: str) -> list[dict]:
                 stack.append(item["path"])
             else:
                 paths.append(item)
-    return sorted(paths)
+    return sorted(paths, key=lambda item: item["path"])
 
 
 def _list_dir(ftp: FTP, path: str) -> list[dict[str, str]]:

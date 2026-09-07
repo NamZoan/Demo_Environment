@@ -100,6 +100,26 @@ def test_process_once_continues_to_next_ftp_config_after_exhausted_retries(monke
     assert processed_paths == {"2:/data/sensor_002/reading.csv"}
 
 
+def test_process_once_processes_multiple_remote_files_in_path_order(monkeypatch):
+    processed_paths = set()
+    processed_files = []
+    ftp = _FakeFtp(
+        files=[
+            {"path": "/data/sensor_002/reading.csv", "type": "file", "size": 1, "modified": None},
+            {"path": "/data/sensor_001/reading.csv", "type": "file", "size": 1, "modified": None},
+        ]
+    )
+    config = {"station_id": None, "host": "ftp", "port": 21, "user": "u", "password": "p", "root_path": "/data", "timeout_seconds": 1}
+
+    monkeypatch.setattr(ftp_poller, "_fetch_station_ftp_configs", lambda: [config])
+    monkeypatch.setattr(ftp_poller, "_connect", lambda _config: ftp)
+    monkeypatch.setattr(ftp_poller, "_process_remote_file", lambda _ftp, path: processed_files.append(path) or 1)
+
+    assert ftp_poller.process_once(processed_paths) == 2
+    assert processed_files == ["/data/sensor_001/reading.csv", "/data/sensor_002/reading.csv"]
+    assert processed_paths == {"None:/data/sensor_001/reading.csv", "None:/data/sensor_002/reading.csv"}
+
+
 def test_process_remote_file_retries_download_before_parsing_and_upsert(monkeypatch):
     ftp = _DownloadFtp(failures=1)
     upsert_calls = []

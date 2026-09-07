@@ -85,20 +85,31 @@ def process_once() -> None:
             readings = parse_sensor_file(path)
             if station_code:
                 readings = [replace(reading, station_code=station_code) for reading in readings]
-            inserted = bulk_upsert_readings(DATABASE_URL, readings)
+        except Exception:
+            destination_dir = FTP_ERROR_DIR
+            logger.exception("Failed to parse %s", path)
+        else:
+            try:
+                inserted = retry_call(
+                    lambda: bulk_upsert_readings(DATABASE_URL, readings),
+                    attempts=RETRY_ATTEMPTS,
+                    initial_delay=RETRY_INITIAL_DELAY_SECONDS,
+                    max_delay=RETRY_MAX_DELAY_SECONDS,
+                    sleep=time.sleep,
+                    random_value=random.random,
+                )
+            except Exception:
+                logger.exception("Failed to persist %s; retaining for a later cycle", path)
+                continue
             logger.info("Processed %s with %s rows", path.name, inserted)
             if not ARCHIVE_PROCESSED_FILES:
                 PROCESSED_FILE_SIGNATURES.add(signature)
                 continue
-        except Exception:
-            destination_dir = FTP_ERROR_DIR
-            logger.exception("Failed to process %s", path)
-        finally:
-            if ARCHIVE_PROCESSED_FILES or destination_dir == FTP_ERROR_DIR:
-                target = destination_dir / path.name
-                if target.exists():
-                    target = destination_dir / f"{path.stem}-{int(time.time())}{path.suffix}"
-                shutil.move(str(path), str(target))
+        if ARCHIVE_PROCESSED_FILES or destination_dir == FTP_ERROR_DIR:
+            target = destination_dir / path.name
+            if target.exists():
+                target = destination_dir / f"{path.stem}-{int(time.time())}{path.suffix}"
+            shutil.move(str(path), str(target))
 
 
 def fetch_folder_station_codes() -> dict[str, str]:
