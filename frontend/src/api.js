@@ -336,6 +336,38 @@ export async function fetchFtpFile({ path, stationId, currentUser }) {
   }
 }
 
+async function rbacRequest(path, options = {}, currentUser) {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers: { ...userHeaders(currentUser), ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers || {}) },
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.detail || "Không thể thực hiện thao tác phân quyền");
+  }
+  return response.status === 204 ? null : response.json();
+}
+
+export function fetchRbacOptions(currentUser) {
+  return rbacRequest("/api/rbac/options", {}, currentUser);
+}
+
+export function fetchRbacUsers(currentUser) {
+  return rbacRequest("/api/rbac/users", {}, currentUser);
+}
+
+export function createRbacUser(payload, currentUser) {
+  return rbacRequest("/api/rbac/users", { method: "POST", body: JSON.stringify(payload) }, currentUser);
+}
+
+export function updateRbacUser(userId, payload, currentUser) {
+  return rbacRequest(`/api/rbac/users/${userId}`, { method: "PUT", body: JSON.stringify(payload) }, currentUser);
+}
+
+export function disableRbacUser(userId, currentUser) {
+  return rbacRequest(`/api/rbac/users/${userId}`, { method: "DELETE" }, currentUser);
+}
+
 export function connectLiveStations(currentUser, onMessage) {
   const url = `${WS_BASE_URL}/ws/live?user_id=${encodeURIComponent(currentUser?.id || 1)}`;
   const socket = new WebSocket(url);

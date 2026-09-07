@@ -22,6 +22,7 @@ MAX_INTERACTIVE_POINTS_DEFAULT = 1000
 MIN_INTERACTIVE_POINTS = 100
 MAX_INTERACTIVE_POINTS = 5000
 MAX_INTERACTIVE_RANGE = timedelta(days=365 * 5)
+RBAC_ROLES = {"super_admin", "manager", "viewer"}
 SENSOR_METRIC_COLUMNS = {
     "temperature": "temperature",
     "humidity": "humidity",
@@ -77,6 +78,33 @@ def metric_column(metric: str) -> str:
         return SENSOR_METRIC_COLUMNS[metric]
     except KeyError as exc:
         raise ValueError("Unsupported metric") from exc
+
+
+def can_manage_users(user: dict) -> bool:
+    return "super_admin" in set(user.get("roles", []))
+
+
+def normalize_user_role(role: str) -> str:
+    if role not in RBAC_ROLES:
+        raise ValueError(f"Unsupported role: {role}")
+    return role
+
+
+def public_user(user: dict) -> dict:
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "full_name": user.get("full_name"),
+        "role": user.get("role", "viewer"),
+        "roles": list(user.get("roles", [])),
+        "status": user.get("status", "active"),
+        "region_ids": list(user.get("region_ids", [])),
+    }
+
+
+def require_user_management(user: dict) -> None:
+    if not can_manage_users(user):
+        raise PermissionError("Only super admins can manage users")
 
 
 def aqi_level(value: float | None) -> str:
@@ -294,6 +322,7 @@ async def fetch_user_context(connection, user_id: int) -> dict[str, Any]:
     row = await connection.fetchrow(
         """
         SELECT
+            u.status,
             COALESCE(array_agg(DISTINCT r.code) FILTER (WHERE r.code IS NOT NULL), ARRAY[]::text[]) AS roles,
             COALESCE(array_agg(DISTINCT ur.region_id) FILTER (WHERE ur.region_id IS NOT NULL), ARRAY[]::bigint[]) AS region_ids
         FROM users u
@@ -306,9 +335,188 @@ async def fetch_user_context(connection, user_id: int) -> dict[str, Any]:
         user_id,
     )
     if row is None:
-        return {"roles": ["viewer"], "region_ids": []}
+        return {"status": "inactive", "roles": ["viewer"], "region_ids": []}
     roles = list(row["roles"]) or ["viewer"]
-    return {"roles": roles, "region_ids": list(row["region_ids"])}
+    return {"status": row["status"], "roles": roles, "region_ids": list(row["region_ids"])}
+
+
+async def fetch_rbac_options(connection) -> dict:
+    roles = await connection.fetch("SELECT code, name, description FROM roles ORDER BY id")
+    regions = await connection.fetch("SELECT id, code, name FROM regions ORDER BY code")
+    return {"roles": [dict(row) for row in roles], "regions": [dict(row) for row in regions]}
+
+
+async def fetch_managed_users(connection) -> list[dict]:
+    rows = await connection.fetch(
+        """
+        SELECT
+            u.id,
+            u.username,
+            u.full_name,
+            u.role,
+            u.status,
+            COALESCE(array_agg(DISTINCT r.code) FILTER (WHERE r.code IS NOT NULL), ARRAY[]::text[]) AS roles,
+            COALESCE(array_agg(DISTINCT ur.region_id) FILTER (WHERE ur.region_id IS NOT NULL), ARRAY[]::bigint[]) AS region_ids
+        FROM users u
+        LEFT JOIN user_roles uro ON uro.user_id = u.id
+        LEFT JOIN roles r ON r.id = uro.role_id
+        LEFT JOIN user_regions ur ON ur.user_id = u.id
+        GROUP BY u.id
+        ORDER BY u.username
+        """
+    )
+    return [public_user(dict(row)) for row in rows]
+
+
+async def fetch_managed_user(connection, user_id: int) -> dict | None:
+    users = await connection.fetch(
+        """
+        SELECT
+            u.id,
+            u.username,
+            u.full_name,
+            u.role,
+            u.status,
+            COALESCE(array_agg(DISTINCT r.code) FILTER (WHERE r.code IS NOT NULL), ARRAY[]::text[]) AS roles,
+            COALESCE(array_agg(DISTINCT ur.region_id) FILTER (WHERE ur.region_id IS NOT NULL), ARRAY[]::bigint[]) AS region_ids
+        FROM users u
+        LEFT JOIN user_roles uro ON uro.user_id = u.id
+        LEFT JOIN roles r ON r.id = uro.role_id
+        LEFT JOIN user_regions ur ON ur.user_id = u.id
+        WHERE u.id = $1
+        GROUP BY u.id
+        """,
+        user_id,
+    )
+    return public_user(dict(users[0])) if users else None
+
+
+async def validate_region_ids(connection, region_ids: list[int]) -> None:
+    region_ids = sorted(set(region_ids))
+    if not region_ids:
+        return
+    count = await connection.fetchval("SELECT count(*) FROM regions WHERE id = ANY($1::bigint[])", region_ids)
+    if count != len(region_ids):
+        raise ValueError("One or more regions do not exist")
+
+
+async def ensure_not_last_super_admin(connection, user_id: int, target_role: str, target_status: str) -> None:
+    if target_role == "super_admin" and target_status == "active":
+        return
+    current_roles = await connection.fetchval(
+        """
+        SELECT EXISTS(
+            SELECT 1 FROM user_roles ur
+            JOIN roles r ON r.id = ur.role_id
+            JOIN users u ON u.id = ur.user_id
+            WHERE ur.user_id = $1 AND r.code = 'super_admin' AND u.status = 'active'
+        )
+        """,
+        user_id,
+    )
+    if not current_roles:
+        return
+    count = await connection.fetchval(
+        """
+        SELECT count(*)
+        FROM users u
+        JOIN user_roles ur ON ur.user_id = u.id
+        JOIN roles r ON r.id = ur.role_id
+        WHERE u.status = 'active' AND r.code = 'super_admin'
+        """
+    )
+    if count <= 1:
+        raise ValueError("Cannot remove the last active super admin")
+
+
+async def create_managed_user(connection, payload: dict) -> dict:
+    role = normalize_user_role(payload["role"])
+    region_ids = sorted(set(payload.get("region_ids", [])))
+    await validate_region_ids(connection, region_ids)
+    row = await connection.fetchrow(
+        """
+        INSERT INTO users (username, password_hash, full_name, role, status)
+        VALUES ($1, crypt($2, gen_salt('bf')), $3, $4, 'active')
+        RETURNING id
+        """,
+        payload["username"],
+        payload["password"],
+        payload.get("full_name", ""),
+        role,
+    )
+    user_id = row["id"]
+    await connection.execute(
+        """
+        INSERT INTO user_roles (user_id, role_id)
+        SELECT $1, id FROM roles WHERE code = $2
+        """,
+        user_id,
+        role,
+    )
+    if region_ids:
+        await connection.executemany(
+            "INSERT INTO user_regions (user_id, region_id) VALUES ($1, $2)",
+            [(user_id, region_id) for region_id in region_ids],
+        )
+    return await fetch_managed_user(connection, user_id)
+
+
+async def update_managed_user(connection, user_id: int, payload: dict) -> dict | None:
+    role = normalize_user_role(payload["role"])
+    region_ids = sorted(set(payload.get("region_ids", [])))
+    await validate_region_ids(connection, region_ids)
+    existing = await fetch_managed_user(connection, user_id)
+    if existing is None:
+        return None
+    await ensure_not_last_super_admin(connection, user_id, role, payload["status"])
+    if payload.get("password"):
+        await connection.execute(
+            """
+            UPDATE users
+            SET full_name = $2, role = $3, status = $4, password_hash = crypt($5, gen_salt('bf')), updated_at = now()
+            WHERE id = $1
+            """,
+            user_id,
+            payload.get("full_name", ""),
+            role,
+            payload["status"],
+            payload["password"],
+        )
+    else:
+        await connection.execute(
+            """
+            UPDATE users SET full_name = $2, role = $3, status = $4, updated_at = now()
+            WHERE id = $1
+            """,
+            user_id,
+            payload.get("full_name", ""),
+            role,
+            payload["status"],
+        )
+    await connection.execute("DELETE FROM user_roles WHERE user_id = $1", user_id)
+    await connection.execute(
+        "INSERT INTO user_roles (user_id, role_id) SELECT $1, id FROM roles WHERE code = $2",
+        user_id,
+        role,
+    )
+    await connection.execute("DELETE FROM user_regions WHERE user_id = $1", user_id)
+    if region_ids:
+        await connection.executemany(
+            "INSERT INTO user_regions (user_id, region_id) VALUES ($1, $2)",
+            [(user_id, region_id) for region_id in region_ids],
+        )
+    return await fetch_managed_user(connection, user_id)
+
+
+async def disable_managed_user(connection, user_id: int, actor_id: int) -> bool:
+    if user_id == actor_id:
+        raise PermissionError("You cannot disable your own account")
+    existing = await fetch_managed_user(connection, user_id)
+    if existing is None:
+        return False
+    await ensure_not_last_super_admin(connection, user_id, existing["role"], "inactive")
+    result = await connection.execute("UPDATE users SET status = 'inactive', updated_at = now() WHERE id = $1", user_id)
+    return result.endswith("1")
 
 
 async def fetch_stations(connection) -> list[dict]:
