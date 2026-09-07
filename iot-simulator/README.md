@@ -1,6 +1,6 @@
 # IoT FTP Sensor Simulator
 
-This module simulates 100 outdoor environmental sensors. Each sensor creates one CSV file every 60 seconds and uploads it to its own FTP directory.
+This module simulates outdoor environmental sensors. Each sensor creates one CSV file every 15 minutes and uploads it to its own FTP directory.
 
 ## Data Format
 
@@ -83,7 +83,7 @@ FTP_USER=station \
 FTP_PASSWORD=stationpass \
 REMOTE_BASE_DIR=/data \
 SENSOR_COUNT=100 \
-INTERVAL_SECONDS=60 \
+INTERVAL_SECONDS=900 \
 python app/simulator.py
 ```
 
@@ -93,7 +93,7 @@ Environment variables:
 
 ```text
 SENSOR_COUNT=100
-INTERVAL_SECONDS=60
+INTERVAL_SECONDS=900
 FTP_HOST=ftp-server
 FTP_PORT=21
 FTP_USER=station

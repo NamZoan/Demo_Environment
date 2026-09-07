@@ -195,7 +195,7 @@ services:
       REMOTE_BASE_DIR: /data
       SENSOR_START: 1
       SENSOR_COUNT: 2
-      INTERVAL_SECONDS: 60
+      INTERVAL_SECONDS: 900
       LOCAL_OUTBOX_DIR: /tmp/iot-outbox
       UPLOAD_RETRIES: 3
       RETRY_BACKOFF_SECONDS: 3
@@ -215,7 +215,7 @@ services:
       REMOTE_BASE_DIR: /data
       SENSOR_START: 3
       SENSOR_COUNT: 2
-      INTERVAL_SECONDS: 60
+      INTERVAL_SECONDS: 900
       LOCAL_OUTBOX_DIR: /tmp/iot-outbox
       UPLOAD_RETRIES: 3
       RETRY_BACKOFF_SECONDS: 3
@@ -235,7 +235,7 @@ services:
       REMOTE_BASE_DIR: /data
       SENSOR_START: 5
       SENSOR_COUNT: 2
-      INTERVAL_SECONDS: 60
+      INTERVAL_SECONDS: 900
       LOCAL_OUTBOX_DIR: /tmp/iot-outbox
       UPLOAD_RETRIES: 3
       RETRY_BACKOFF_SECONDS: 3
@@ -255,7 +255,7 @@ services:
       REMOTE_BASE_DIR: /data
       SENSOR_START: 7
       SENSOR_COUNT: 2
-      INTERVAL_SECONDS: 60
+      INTERVAL_SECONDS: 900
       LOCAL_OUTBOX_DIR: /tmp/iot-outbox
       UPLOAD_RETRIES: 3
       RETRY_BACKOFF_SECONDS: 3
@@ -275,7 +275,7 @@ services:
       REMOTE_BASE_DIR: /data
       SENSOR_START: 9
       SENSOR_COUNT: 2
-      INTERVAL_SECONDS: 60
+      INTERVAL_SECONDS: 900
       LOCAL_OUTBOX_DIR: /tmp/iot-outbox
       UPLOAD_RETRIES: 3
       RETRY_BACKOFF_SECONDS: 3

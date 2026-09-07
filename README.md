@@ -8,7 +8,7 @@ Dockerized reference stack for 2,000 environmental monitoring stations sending 1
 - FastAPI backend on `http://localhost:8000`
 - FTP server on `localhost:21`
 - FTP worker polling uploaded CSV/JSON files
-- IoT simulator publishing 100 outdoor sensor CSV files every 60 seconds
+- IoT simulators publishing two sensor CSV files per FTP every 15 minutes
 - React dashboard on `http://localhost:3000`
 
 ## Run
