@@ -152,6 +152,10 @@ class QueryMeta(BaseModel):
     returned_points: int
     downsampled: bool
     resolution_note: str | None = None
+    page: int | None = None
+    page_size: int | None = None
+    total_points: int | None = None
+    total_pages: int | None = None
 
 
 class StationDataResponse(BaseModel):

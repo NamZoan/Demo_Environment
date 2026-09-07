@@ -10,6 +10,8 @@ STALE_AFTER = timedelta(minutes=30)
 MAX_INTERACTIVE_POINTS_DEFAULT = 1000
 MIN_INTERACTIVE_POINTS = 100
 MAX_INTERACTIVE_POINTS = 5000
+MIN_STATION_PAGE_SIZE = 25
+MAX_STATION_PAGE_SIZE = 500
 MAX_INTERACTIVE_RANGE = timedelta(days=365 * 5)
 RBAC_ROLES = {"super_admin", "manager", "viewer"}
 SENSOR_METRIC_COLUMNS = {
@@ -20,6 +22,7 @@ SENSOR_METRIC_COLUMNS = {
 }
 RESOLUTION_DURATIONS = {
     "1m": timedelta(minutes=1),
+    "15m": timedelta(minutes=15),
     "1h": timedelta(hours=1),
     "1d": timedelta(days=1),
 }
@@ -151,6 +154,7 @@ def aqi_level(value: float | None) -> str:
 def resolution_source(resolution: str) -> tuple[str, str]:
     sources = {
         "1m": ("sensor_data", "time"),
+        "15m": ("sensor_data", "time"),
         "1h": ("sensor_data_hourly", "bucket"),
         "1d": ("sensor_data_daily", "bucket"),
     }
@@ -179,6 +183,26 @@ def station_data_source(resolution: str) -> tuple[str, str]:
             ORDER BY time
             """,
             "time",
+        )
+    if resolution == "15m":
+        return (
+            """
+            SELECT
+                time_bucket('15 minutes', time) AS bucket,
+                avg(temperature) AS temperature,
+                avg(humidity) AS humidity,
+                avg(wind_speed) AS wind_speed,
+                avg(pm25) AS pm25,
+                count(*)::bigint AS samples,
+                NULL::bigint AS valid_hours
+            FROM sensor_data
+            WHERE station_id = $1
+              AND time >= $2
+              AND time <= $3
+            GROUP BY bucket
+            ORDER BY bucket
+            """,
+            "bucket",
         )
     if resolution == "1h":
         return (
@@ -240,6 +264,12 @@ def station_downsample_source(resolution: str) -> tuple[str, str]:
             "wind_speed": "avg(wind_speed) AS wind_speed",
             "pm25": "avg(pm25) AS pm25",
         },
+        "15m": {
+            "temperature": "avg(temperature) AS temperature",
+            "humidity": "avg(humidity) AS humidity",
+            "wind_speed": "avg(wind_speed) AS wind_speed",
+            "pm25": "avg(pm25) AS pm25",
+        },
         "1h": {
             "temperature": "sum(temperature * samples) / nullif(sum(samples), 0) AS temperature",
             "humidity": "sum(humidity * samples) / nullif(sum(samples), 0) AS humidity",
@@ -255,6 +285,7 @@ def station_downsample_source(resolution: str) -> tuple[str, str]:
     }
     sample_expressions = {
         "1m": ("count(*)::bigint AS samples", "NULL::bigint AS valid_hours"),
+        "15m": ("count(*)::bigint AS samples", "NULL::bigint AS valid_hours"),
         "1h": ("sum(samples)::bigint AS samples", "NULL::bigint AS valid_hours"),
         "1d": ("sum(samples)::bigint AS samples", "sum(valid_hours)::bigint AS valid_hours"),
     }
@@ -298,7 +329,7 @@ def validate_interactive_query_range(start_time: datetime, end_time: datetime, m
 
 def choose_effective_resolution(requested_resolution: str, start_time: datetime, end_time: datetime) -> tuple[str, str | None]:
     span = end_time - start_time
-    if requested_resolution in {"1m", "1h"} and span > timedelta(days=90):
+    if requested_resolution in {"15m", "1m", "1h"} and span > timedelta(days=90):
         return "1d", f"Switched from {requested_resolution} to 1d because the selected range is longer than 90 days."
     if requested_resolution == "1m" and span > timedelta(hours=48):
         return "1h", "Switched from 1m to 1h because the selected range is longer than 48 hours."
@@ -314,8 +345,11 @@ def query_meta(
     returned_points: int,
     downsampled: bool,
     resolution_note: str | None,
+    page: int | None = None,
+    page_size: int | None = None,
+    total_points: int | None = None,
 ) -> dict:
-    return {
+    meta = {
         "requested_resolution": requested_resolution,
         "effective_resolution": effective_resolution,
         "max_points": max_points,
@@ -323,6 +357,9 @@ def query_meta(
         "downsampled": downsampled,
         "resolution_note": resolution_note,
     }
+    if page is not None:
+        meta.update({"page": page, "page_size": page_size, "total_points": total_points, "total_pages": ceil(total_points / page_size) if total_points else 0})
+    return meta
 
 
 def authentication_query() -> str:
@@ -1117,8 +1154,14 @@ async def fetch_station_data(
     resolution: str,
     user: dict,
     max_points: int = MAX_INTERACTIVE_POINTS_DEFAULT,
+    page: int | None = None,
+    page_size: int | None = None,
 ) -> dict:
     validate_interactive_query_range(start_time, end_time, max_points)
+    if page is not None and page < 1:
+        raise ValueError("page must be at least 1")
+    if page_size is not None and not MIN_STATION_PAGE_SIZE <= page_size <= MAX_STATION_PAGE_SIZE:
+        raise ValueError(f"page_size must be between {MIN_STATION_PAGE_SIZE} and {MAX_STATION_PAGE_SIZE}")
     station_region_id = await resolve_station_region_id(connection, station_id)
     if not can_read_station(user, station_region_id):
         raise PermissionError("Station is outside assigned regions")
@@ -1126,6 +1169,18 @@ async def fetch_station_data(
     effective_resolution, resolution_note = choose_effective_resolution(resolution, start_time, end_time)
     candidate_points = estimated_candidate_points(start_time, end_time, effective_resolution)
     downsampled = candidate_points > max_points
+    if page_size is not None:
+        page = page or 1
+        source_query, bucket_column = station_data_source(effective_resolution)
+        count_query = f"SELECT count(*)::bigint AS total_points FROM ({source_query}) station_points"
+        count_row = await connection.fetchrow(count_query, station_id, start_time, end_time)
+        total_points = int(count_row["total_points"] or 0)
+        offset = (page - 1) * page_size
+        rows = await connection.fetch(f"{source_query}\nLIMIT $4 OFFSET $5", station_id, start_time, end_time, page_size, offset)
+        return {
+            "meta": query_meta(resolution, effective_resolution, max_points, len(rows), False, resolution_note, page, page_size, total_points),
+            "points": [{**dict(row), "time": row[bucket_column]} for row in rows],
+        }
     if downsampled:
         query, bucket_column = station_downsample_source(effective_resolution)
         interval_seconds = downsample_interval_seconds(candidate_points, max_points, effective_resolution)

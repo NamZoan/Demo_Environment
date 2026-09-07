@@ -61,12 +61,14 @@ export async function login({ username, password }) {
   }
 }
 
-export async function fetchStationData({ stationId, startTime, endTime, resolution, maxPoints = 1000, currentUser }) {
+export async function fetchStationData({ stationId, startTime, endTime, resolution, maxPoints = 1000, page = 1, pageSize = 100, currentUser }) {
   const params = new URLSearchParams({
     start_time: new Date(startTime).toISOString(),
     end_time: new Date(endTime).toISOString(),
     resolution,
     max_points: String(maxPoints),
+    page: String(page),
+    page_size: String(pageSize),
   });
   try {
     const response = await fetch(`${API_BASE_URL}/api/stations/${stationId}/data?${params}`, {

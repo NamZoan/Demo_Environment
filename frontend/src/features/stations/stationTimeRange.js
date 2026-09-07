@@ -1,5 +1,5 @@
 export const stationResolutionOptions = [
-  { value: "1m", label: "Giá trị phút", defaultHours: 24 },
+  { value: "15m", label: "Trung bình 15 phút", defaultHours: 24 },
   { value: "1h", label: "Trung bình giờ", defaultHours: 24 * 7 },
   { value: "1d", label: "Trung bình ngày", defaultHours: 24 * 30 },
 ];
@@ -20,11 +20,13 @@ export function toDateTimeLocalValue(date) {
   return new Date(value.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
-export function stationDataQuery({ startTime, endTime, resolution }) {
+export function stationDataQuery({ startTime, endTime, resolution, page = 1, pageSize = 100 }) {
   return {
     startTime: new Date(startTime),
     endTime: new Date(endTime),
     resolution,
+    page,
+    pageSize,
   };
 }
 
@@ -38,10 +40,10 @@ export function preferredStationResolution({ startTime, endTime }) {
   const start = new Date(startTime);
   const end = new Date(endTime);
   const hours = (end.getTime() - start.getTime()) / (60 * 60 * 1000);
-  if (!Number.isFinite(hours)) return "1m";
+  if (!Number.isFinite(hours)) return "15m";
   if (hours > 24 * 90) return "1d";
   if (hours > 48) return "1h";
-  return "1m";
+  return "15m";
 }
 
 export function queryOptimizationNote(meta) {

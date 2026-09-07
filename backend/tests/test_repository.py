@@ -34,6 +34,13 @@ def test_resolution_source_selects_raw_table_for_one_minute():
     assert bucket_column == "time"
 
 
+def test_resolution_source_selects_raw_table_for_fifteen_minutes():
+    table, bucket_column = resolution_source("15m")
+
+    assert table == "sensor_data"
+    assert bucket_column == "time"
+
+
 def test_resolution_source_selects_hourly_aggregate():
     table, bucket_column = resolution_source("1h")
 
@@ -43,7 +50,7 @@ def test_resolution_source_selects_hourly_aggregate():
 
 def test_resolution_source_rejects_unknown_resolution():
     with pytest.raises(ValueError, match="Unsupported resolution"):
-        resolution_source("15m")
+        resolution_source("5m")
 
 
 def test_metric_column_rejects_unsafe_metrics():
@@ -98,6 +105,16 @@ def test_choose_effective_resolution_upgrades_one_hour_after_90_days():
     assert note == "Switched from 1h to 1d because the selected range is longer than 90 days."
 
 
+def test_choose_effective_resolution_upgrades_fifteen_minutes_after_90_days():
+    start = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
+    end = start + timedelta(days=120)
+
+    effective, note = choose_effective_resolution("15m", start, end)
+
+    assert effective == "1d"
+    assert note == "Switched from 15m to 1d because the selected range is longer than 90 days."
+
+
 def test_validate_interactive_query_range_rejects_bad_ranges_and_points():
     start = datetime(2026, 9, 5, tzinfo=timezone.utc)
 
@@ -145,6 +162,14 @@ def test_station_data_source_selects_hourly_continuous_aggregate():
     assert "FROM sensor_data_hourly" in query
     assert "time_bucket('1 hour', time)" not in query
     assert "valid_hours" in query
+
+
+def test_station_data_source_aggregates_raw_data_into_fifteen_minute_buckets():
+    query, bucket_column = station_data_source("15m")
+
+    assert bucket_column == "bucket"
+    assert "time_bucket('15 minutes', time)" in query
+    assert "avg(temperature) AS temperature" in query
 
 
 def test_station_data_source_selects_daily_continuous_aggregate():
@@ -206,15 +231,26 @@ def test_station_downsample_source_weights_continuous_aggregate_values(resolutio
     assert "sum(pm25 * samples) / nullif(sum(samples), 0) AS pm25" in query
 
 
+def test_station_downsample_source_supports_fifteen_minute_buckets():
+    query, bucket_column = station_downsample_source("15m")
+
+    assert bucket_column == "bucket"
+    assert "avg(temperature) AS temperature" in query
+    assert "FROM sensor_data" in query
+
+
 class FakeStationDataConnection:
-    def __init__(self, region_id, rows=None):
+    def __init__(self, region_id, rows=None, total_points=None):
         self.region_id = region_id
         self.rows = rows or []
+        self.total_points = total_points
         self.fetch_calls = []
 
     async def fetchrow(self, query, *args):
         if "SELECT region_id FROM stations" in query:
             return {"region_id": self.region_id}
+        if "count" in query.lower():
+            return {"total_points": self.total_points}
         return None
 
     async def fetch(self, query, *args):
@@ -313,6 +349,45 @@ def test_fetch_station_data_downsamples_when_candidate_count_exceeds_max_points(
     assert payload["meta"]["downsampled"] is True
     assert payload["meta"]["returned_points"] == 1
     assert payload["meta"]["resolution_note"] == "Returned 100 representative points from 1441 available points."
+
+
+def test_fetch_station_data_returns_requested_page_and_total_pages():
+    row_time = datetime(2026, 9, 5, 0, 0, tzinfo=timezone.utc)
+    connection = FakeStationDataConnection(
+        region_id=20,
+        total_points=250,
+        rows=[
+            {
+                "bucket": row_time,
+                "temperature": 30.5,
+                "humidity": 72.0,
+                "wind_speed": 2.1,
+                "pm25": 41.2,
+                "samples": 1,
+                "valid_hours": None,
+            }
+        ],
+    )
+
+    payload = asyncio.run(
+        fetch_station_data(
+            connection,
+            station_id=100,
+            start_time=row_time,
+            end_time=row_time + timedelta(hours=24),
+            resolution="15m",
+            user={"roles": ["super_admin"], "region_ids": []},
+            max_points=1000,
+            page=2,
+            page_size=100,
+        )
+    )
+
+    assert payload["meta"]["page"] == 2
+    assert payload["meta"]["page_size"] == 100
+    assert payload["meta"]["total_points"] == 250
+    assert payload["meta"]["total_pages"] == 3
+    assert connection.fetch_calls[0][1][-2:] == (100, 100)
 
 
 def test_fetch_analytics_series_returns_envelope_and_uses_effective_resolution():

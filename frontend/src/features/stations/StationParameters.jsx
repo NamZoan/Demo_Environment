@@ -25,15 +25,8 @@ import {
   YAxis,
 } from "recharts";
 
-import { createMockSeries } from "../../services/mockApi.js";
 import { fetchFtpFile, fetchFtpFiles, fetchFtpIndex, fetchFtpStatus, fetchStationData } from "../../api.js";
-import { queryOptimizationNote, stationResolutionOptions } from "./stationTimeRange.js";
-
-const rangeOptions = [
-  { value: "day", label: "Ngày" },
-  { value: "week", label: "Tuần" },
-  { value: "month", label: "Tháng" },
-];
+import { defaultStationTimeRange, isStationTimeRangeValid, queryOptimizationNote, stationResolutionOptions } from "./stationTimeRange.js";
 
 const metricConfig = [
   { key: "temperature", thresholdKey: "temperature", label: "Nhiệt độ", unit: "C", icon: Thermometer, warning: 38, critical: 42 },
@@ -51,15 +44,9 @@ const lineColors = {
   co: "#7c3aed",
 };
 
-const rangeConfig = {
-  day: { hours: 24, resolution: "1m" },
-  week: { hours: 24 * 7, resolution: "1h" },
-  month: { hours: 24 * 30, resolution: "1d" },
-};
-
 function chartTimeLabel(value, resolution) {
   const date = new Date(value);
-  if (resolution === "1m") {
+  if (resolution === "1m" || resolution === "15m") {
     return date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
   }
   return date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" });
@@ -138,7 +125,13 @@ function cardStyle(level) {
 }
 
 export default function StationParameters({ onBack, station }) {
-  const [range, setRange] = useState("day");
+  const [resolution, setResolution] = useState("15m");
+  const [timeRange, setTimeRange] = useState(() => defaultStationTimeRange("15m"));
+  const [submittedQuery, setSubmittedQuery] = useState(null);
+  const [page, setPage] = useState(1);
+  const [queryError, setQueryError] = useState("");
+  const pageSize = 100;
+  const [dataLoading, setDataLoading] = useState(false);
   const [backendSeries, setBackendSeries] = useState([]);
   const [queryMeta, setQueryMeta] = useState(null);
   const [dataSource, setDataSource] = useState("mock");
@@ -149,14 +142,13 @@ export default function StationParameters({ onBack, station }) {
   const [ftpRefreshKey, setFtpRefreshKey] = useState(0);
   const [csvPreview, setCsvPreview] = useState(null);
   const [csvLoading, setCsvLoading] = useState(false);
-  const mockSeries = useMemo(() => createMockSeries(station.id, range), [range, station.id]);
-  const series = dataSource === "backend" ? backendSeries : mockSeries;
-  const selectedRange = rangeConfig[range];
+  const series = backendSeries;
+  const querySubmitted = submittedQuery !== null;
   const optimizationNote = queryOptimizationNote(queryMeta);
-  const effectiveResolution = queryMeta?.effective_resolution || selectedRange.resolution;
+  const effectiveResolution = queryMeta?.effective_resolution || resolution;
   const effectiveResolutionOption =
     stationResolutionOptions.find((item) => item.value === effectiveResolution) ||
-    stationResolutionOptions.find((item) => item.value === selectedRange.resolution);
+    stationResolutionOptions.find((item) => item.value === resolution);
   const parsedCsv = useMemo(() => parseCsvPreview(csvPreview?.content || ""), [csvPreview]);
   const stationDetails = [
     { label: "Mã trạm", value: station.code },
@@ -171,20 +163,23 @@ export default function StationParameters({ onBack, station }) {
   ];
 
   useEffect(() => {
+    if (!submittedQuery) return undefined;
     let cancelled = false;
-    const now = new Date();
-    const start = new Date(now.getTime() - selectedRange.hours * 60 * 60 * 1000);
+    setDataLoading(true);
 
     fetchStationData({
       stationId: station.id,
-      startTime: start,
-      endTime: now,
-      resolution: selectedRange.resolution,
+      startTime: submittedQuery.startTime,
+      endTime: submittedQuery.endTime,
+      resolution: submittedQuery.resolution,
+      maxPoints: 5000,
+      page,
+      pageSize,
       currentUser: { id: 1 },
     })
       .then((payload) => {
         if (cancelled) return;
-        const normalized = normalizeSeries(payload.points, payload.meta?.effective_resolution || selectedRange.resolution);
+        const normalized = normalizeSeries(payload.points, payload.meta?.effective_resolution || submittedQuery.resolution);
         setQueryMeta(payload.meta);
         setBackendSeries(normalized);
         setDataSource("backend");
@@ -194,17 +189,44 @@ export default function StationParameters({ onBack, station }) {
         setQueryMeta(null);
         setBackendSeries([]);
         setDataSource("mock");
+        setQueryError("Không thể tải dữ liệu trạm trong khoảng thời gian đã chọn.");
+      })
+      .finally(() => {
+        if (!cancelled) setDataLoading(false);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [range, station.id]);
+  }, [page, station.id, submittedQuery]);
 
   useEffect(() => {
     setFtpPath(defaultFtpPath(station));
     setCsvPreview(null);
-  }, [station.code]);
+    setResolution("15m");
+    setTimeRange(defaultStationTimeRange("15m"));
+    setSubmittedQuery(null);
+    setPage(1);
+    setQueryMeta(null);
+    setBackendSeries([]);
+    setQueryError("");
+  }, [station.id, station.code]);
+
+  function updateTimeRange(field, value) {
+    setTimeRange((current) => ({ ...current, [field]: value }));
+    setQueryError("");
+  }
+
+  function submitDataQuery(event) {
+    event.preventDefault();
+    if (!isStationTimeRangeValid(timeRange) || new Date(timeRange.startTime).getTime() === new Date(timeRange.endTime).getTime()) {
+      setQueryError("Vui lòng chọn khoảng thời gian hợp lệ, trong đó thời gian bắt đầu phải trước thời gian kết thúc.");
+      return;
+    }
+    setPage(1);
+    setQueryError("");
+    setSubmittedQuery({ ...timeRange, resolution });
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -265,28 +287,38 @@ export default function StationParameters({ onBack, station }) {
             {station.code} - {station.region} - {station.latitude}, {station.longitude}
           </p>
         </div>
-        <div className="grid gap-2">
-          <label className="grid gap-1 text-sm text-slate-600">
-            <span className="flex items-center gap-2">
-              <CalendarDays className="h-4 w-4" />
-              Khoảng thời gian
-            </span>
-            <select
-              className="h-10 rounded-md border border-slate-300 bg-white px-3 outline-none focus:border-cyan-600"
-              onChange={(event) => setRange(event.target.value)}
-              value={range}
-            >
-              {rangeOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {optimizationNote && (
-            <p className="max-w-sm rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-800">{optimizationNote}</p>
-          )}
-        </div>
+        <form className="grid gap-2 rounded-md border border-slate-200 bg-white p-3" onSubmit={submitDataQuery}>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <label className="grid gap-1 text-sm text-slate-600">
+              <span>Độ phân giải</span>
+              <select
+                className="h-10 rounded-md border border-slate-300 bg-white px-3 outline-none focus:border-cyan-600"
+                onChange={(event) => setResolution(event.target.value)}
+                value={resolution}
+              >
+                {stationResolutionOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm text-slate-600">
+              <span className="flex items-center gap-1"><CalendarDays className="h-4 w-4" />Từ thời gian</span>
+              <input className="h-10 rounded-md border border-slate-300 px-2 outline-none focus:border-cyan-600" onChange={(event) => updateTimeRange("startTime", event.target.value)} type="datetime-local" value={timeRange.startTime} />
+            </label>
+            <label className="grid gap-1 text-sm text-slate-600">
+              <span>Đến thời gian</span>
+              <input className="h-10 rounded-md border border-slate-300 px-2 outline-none focus:border-cyan-600" onChange={(event) => updateTimeRange("endTime", event.target.value)} type="datetime-local" value={timeRange.endTime} />
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" disabled={dataLoading} type="submit">{dataLoading ? "Đang tải..." : "Xem dữ liệu"}</button>
+            {!querySubmitted && <span className="text-sm text-slate-500">Chọn bộ lọc rồi bấm “Xem dữ liệu”.</span>}
+            {queryError && <span className="text-sm text-red-700">{queryError}</span>}
+          </div>
+          {optimizationNote && <p className="max-w-sm rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-sm font-medium text-cyan-800">{optimizationNote}</p>}
+        </form>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
@@ -475,29 +507,46 @@ export default function StationParameters({ onBack, station }) {
             </p>
           </div>
         </div>
-        <div className="h-[420px]">
-          <ResponsiveContainer height="100%" width="100%">
-            <LineChart data={series} margin={{ bottom: 8, left: 0, right: 20, top: 10 }}>
-              <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
-              <XAxis dataKey="time" tick={{ fontSize: 12 }} />
-              <YAxis tick={{ fontSize: 12 }} />
-              <Tooltip />
-              <Legend />
-              {metricConfig.map((metric) => (
-                <Line
-                  connectNulls
-                  dataKey={metric.key}
-                  dot={false}
-                  key={metric.key}
-                  name={metric.label}
-                  stroke={lineColors[metric.key]}
-                  strokeWidth={2}
-                  type="monotone"
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+        {!querySubmitted ? (
+          <div className="grid h-[280px] place-items-center rounded-md border border-dashed border-slate-300 bg-slate-50 text-sm text-slate-500">Chưa tải dữ liệu. Hãy chọn khoảng thời gian và bấm “Xem dữ liệu”.</div>
+        ) : dataLoading ? (
+          <div className="grid h-[280px] place-items-center rounded-md border border-slate-200 bg-slate-50 text-sm text-slate-500">Đang tải dữ liệu...</div>
+        ) : series.length === 0 ? (
+          <div className="grid h-[280px] place-items-center rounded-md border border-slate-200 bg-slate-50 text-sm text-slate-500">Không có dữ liệu trong khoảng thời gian đã chọn.</div>
+        ) : (
+          <div className="h-[420px]">
+            <ResponsiveContainer height="100%" width="100%">
+              <LineChart data={series} margin={{ bottom: 8, left: 0, right: 20, top: 10 }}>
+                <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
+                <XAxis dataKey="time" tick={{ fontSize: 12 }} />
+                <YAxis tick={{ fontSize: 12 }} />
+                <Tooltip />
+                <Legend />
+                {metricConfig.map((metric) => (
+                  <Line
+                    connectNulls
+                    dataKey={metric.key}
+                    dot={false}
+                    key={metric.key}
+                    name={metric.label}
+                    stroke={lineColors[metric.key]}
+                    strokeWidth={2}
+                    type="monotone"
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+        {querySubmitted && queryMeta && queryMeta.total_pages > 0 && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-sm text-slate-600">
+            <span>Trang {queryMeta.page} / {queryMeta.total_pages} · {queryMeta.total_points} điểm</span>
+            <div className="flex gap-2">
+              <button className="rounded-md border border-slate-300 px-3 py-2 disabled:opacity-40" disabled={dataLoading || queryMeta.page <= 1} onClick={() => setPage((current) => current - 1)} type="button">Trước</button>
+              <button className="rounded-md border border-slate-300 px-3 py-2 disabled:opacity-40" disabled={dataLoading || queryMeta.page >= queryMeta.total_pages} onClick={() => setPage((current) => current + 1)} type="button">Sau</button>
+            </div>
+          </div>
+        )}
       </section>
     </section>
   );
