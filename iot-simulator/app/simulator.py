@@ -19,7 +19,7 @@ CSV_COLUMNS = ["sensor_id", "timestamp", "temperature", "humidity", "wind_speed"
 class Settings:
     sensor_start: int = int(os.getenv("SENSOR_START", "1"))
     sensor_count: int = int(os.getenv("SENSOR_COUNT", "100"))
-    interval_seconds: int = int(os.getenv("INTERVAL_SECONDS", "60"))
+    interval_seconds: int = int(os.getenv("INTERVAL_SECONDS", "900"))
     ftp_host: str = os.getenv("FTP_HOST", "ftp-server")
     ftp_port: int = int(os.getenv("FTP_PORT", "21"))
     ftp_user: str = os.getenv("FTP_USER", "station")
