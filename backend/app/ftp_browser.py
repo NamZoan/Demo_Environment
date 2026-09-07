@@ -8,6 +8,7 @@ from io import BytesIO
 
 FTP_ROOT = "/data"
 MAX_PREVIEW_BYTES = 256 * 1024
+PREVIEW_EXTENSIONS = {".csv", ".json", ".log", ".txt"}
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,14 @@ def normalize_ftp_csv_file_path(path: str | None) -> str:
     return normalized
 
 
+def normalize_ftp_preview_file_path(path: str | None) -> str:
+    normalized = normalize_ftp_path(path)
+    suffix = posixpath.splitext(normalized)[1].lower()
+    if suffix not in PREVIEW_EXTENSIONS:
+        raise ValueError("Only text files can be previewed")
+    return normalized
+
+
 def check_ftp_status(settings: FtpConnectionSettings) -> dict:
     with _connect(settings) as ftp:
         welcome = ftp.getwelcome()
@@ -67,6 +76,14 @@ def list_ftp_directory(settings: FtpConnectionSettings, path: str | None) -> dic
 
 def read_ftp_csv_file(settings: FtpConnectionSettings, path: str | None) -> dict:
     normalized_path = normalize_ftp_csv_file_path(path)
+    return _read_ftp_text_file(settings, normalized_path)
+
+
+def read_ftp_file(settings: FtpConnectionSettings, path: str | None) -> dict:
+    return _read_ftp_text_file(settings, normalize_ftp_preview_file_path(path))
+
+
+def _read_ftp_text_file(settings: FtpConnectionSettings, normalized_path: str) -> dict:
     with _connect(settings) as ftp:
         buffer = BytesIO()
 

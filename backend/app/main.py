@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import database
-from app.ftp_browser import FtpConnectionSettings, check_ftp_status, list_ftp_directory, normalize_ftp_path, read_ftp_csv_file
+from app.ftp_browser import FtpConnectionSettings, check_ftp_status, list_ftp_directory, normalize_ftp_path, read_ftp_file
 from app.repository import (
     MAX_INTERACTIVE_POINTS_DEFAULT,
     authenticate_user,
@@ -24,6 +24,7 @@ from app.repository import (
     fetch_station_data,
     fetch_station_by_id,
     fetch_station_ftp_config,
+    fetch_ftp_connection_settings,
     fetch_ftp_configs,
     delete_station_ftp_config,
     save_station_ftp_config,
@@ -270,6 +271,13 @@ async def station_ftp_settings(station_id: int, connection) -> FtpConnectionSett
     return FtpConnectionSettings(**config)
 
 
+async def catalog_ftp_settings(ftp_id: int, connection, user: dict) -> FtpConnectionSettings:
+    config = await fetch_ftp_connection_settings(connection, ftp_id, user, settings.ftp_credentials_key)
+    if config is None:
+        raise HTTPException(status_code=404, detail="FTP configuration not found")
+    return FtpConnectionSettings(**config)
+
+
 @app.post("/api/ftp/test", response_model=FtpStatus)
 async def test_ftp_connection(payload: FtpConnectionRequest, user: dict = Depends(current_user)) -> dict:
     try:
@@ -340,13 +348,16 @@ async def remove_ftp_config(ftp_id: int, user: dict = Depends(current_user)) -> 
 
 
 @app.get("/api/ftp/status", response_model=FtpStatus)
-async def ftp_status(station_id: int | None = Query(None), user: dict = Depends(current_user)) -> dict:
+async def ftp_status(station_id: int | None = Query(None), ftp_id: int | None = Query(None), user: dict = Depends(current_user)) -> dict:
     connection_settings = ftp_settings()
-    root_path = "/data"
-    if station_id is not None:
-        async with database.acquire() as connection:
+    root_path = connection_settings.root_path
+    async with database.acquire() as connection:
+        if ftp_id is not None:
+            connection_settings = await catalog_ftp_settings(ftp_id, connection, user)
+            root_path = connection_settings.root_path
+        elif station_id is not None:
             connection_settings = await station_ftp_settings(station_id, connection)
-        root_path = connection_settings.root_path if hasattr(connection_settings, "root_path") else root_path
+            root_path = connection_settings.root_path
     try:
         result = await asyncio.to_thread(check_ftp_status, connection_settings)
         result["root_path"] = root_path
@@ -363,10 +374,12 @@ async def ftp_status(station_id: int | None = Query(None), user: dict = Depends(
 
 
 @app.get("/api/ftp/files", response_model=FtpListing)
-async def ftp_files(path: str | None = Query(None), station_id: int | None = Query(None), user: dict = Depends(current_user)) -> dict:
+async def ftp_files(path: str | None = Query(None), station_id: int | None = Query(None), ftp_id: int | None = Query(None), user: dict = Depends(current_user)) -> dict:
     connection_settings = ftp_settings()
-    if station_id is not None:
-        async with database.acquire() as connection:
+    async with database.acquire() as connection:
+        if ftp_id is not None:
+            connection_settings = await catalog_ftp_settings(ftp_id, connection, user)
+        elif station_id is not None:
             connection_settings = await station_ftp_settings(station_id, connection)
     path = path or (getattr(connection_settings, "root_path", "/data"))
     try:
@@ -390,13 +403,15 @@ async def ftp_file_index(station_id: int = Query(...), user: dict = Depends(curr
 
 
 @app.get("/api/ftp/file", response_model=FtpFilePreview)
-async def ftp_file(path: str = Query(...), station_id: int | None = Query(None), user: dict = Depends(current_user)) -> dict:
+async def ftp_file(path: str = Query(...), station_id: int | None = Query(None), ftp_id: int | None = Query(None), user: dict = Depends(current_user)) -> dict:
     connection_settings = ftp_settings()
-    if station_id is not None:
-        async with database.acquire() as connection:
+    async with database.acquire() as connection:
+        if ftp_id is not None:
+            connection_settings = await catalog_ftp_settings(ftp_id, connection, user)
+        elif station_id is not None:
             connection_settings = await station_ftp_settings(station_id, connection)
     try:
-        return await asyncio.to_thread(read_ftp_csv_file, connection_settings, path)
+        return await asyncio.to_thread(read_ftp_file, connection_settings, path)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

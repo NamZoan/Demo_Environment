@@ -286,9 +286,10 @@ export async function fetchBackendHealth() {
   }
 }
 
-export async function fetchFtpStatus({ currentUser, stationId } = {}) {
+export async function fetchFtpStatus({ currentUser, stationId, ftpId } = {}) {
   try {
-    const params = stationId ? `?station_id=${encodeURIComponent(stationId)}` : "";
+    const query = new URLSearchParams({ ...(stationId ? { station_id: String(stationId) } : {}), ...(ftpId ? { ftp_id: String(ftpId) } : {}) });
+    const params = query.toString() ? `?${query}` : "";
     const response = await fetch(`${API_BASE_URL}/api/ftp/status${params}`, {
       headers: userHeaders(currentUser),
     });
@@ -308,9 +309,9 @@ export async function fetchFtpStatus({ currentUser, stationId } = {}) {
   }
 }
 
-export async function fetchFtpFiles({ path, stationId, currentUser }) {
+export async function fetchFtpFiles({ path, stationId, ftpId, currentUser }) {
   try {
-    const params = new URLSearchParams({ ...(path ? { path } : {}), ...(stationId ? { station_id: String(stationId) } : {}) });
+    const params = new URLSearchParams({ ...(path ? { path } : {}), ...(stationId ? { station_id: String(stationId) } : {}), ...(ftpId ? { ftp_id: String(ftpId) } : {}) });
     const response = await fetch(`${API_BASE_URL}/api/ftp/files?${params}`, {
       headers: userHeaders(currentUser),
     });
@@ -340,9 +341,9 @@ export async function fetchFtpIndex({ stationId, currentUser }) {
   }
 }
 
-export async function fetchFtpFile({ path, stationId, currentUser }) {
+export async function fetchFtpFile({ path, stationId, ftpId, currentUser }) {
   try {
-    const params = new URLSearchParams({ path, ...(stationId ? { station_id: String(stationId) } : {}) });
+    const params = new URLSearchParams({ path, ...(stationId ? { station_id: String(stationId) } : {}), ...(ftpId ? { ftp_id: String(ftpId) } : {}) });
     const response = await fetch(`${API_BASE_URL}/api/ftp/file?${params}`, {
       headers: userHeaders(currentUser),
     });
