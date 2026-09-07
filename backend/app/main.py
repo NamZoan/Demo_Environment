@@ -313,6 +313,8 @@ async def ftp_file_index(station_id: int = Query(...), user: dict = Depends(curr
             entries = await fetch_ftp_file_index(connection, station_id, user)
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"path": "/data", "entries": entries}
 
 
