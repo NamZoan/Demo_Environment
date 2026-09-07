@@ -65,7 +65,7 @@ def test_process_once_maps_folder_to_configured_station(monkeypatch, tmp_path):
     assert calls[0][0].station_code == "station-renamed"
 
 
-def test_process_once_rejects_folder_without_station_assignment(monkeypatch, tmp_path):
+def test_process_once_keeps_history_until_folder_is_assigned(monkeypatch, tmp_path):
     incoming = tmp_path / "data"
     source = incoming / "sensor_001" / "reading.csv"
     source.parent.mkdir(parents=True)
@@ -78,12 +78,19 @@ def test_process_once_rejects_folder_without_station_assignment(monkeypatch, tmp
     (tmp_path / "error").mkdir()
     monkeypatch.setattr(worker, "ARCHIVE_PROCESSED_FILES", False)
     monkeypatch.setattr(worker, "FTP_SERVER_ID", 7)
-    monkeypatch.setattr(worker, "fetch_folder_station_codes", lambda: {})
     monkeypatch.setattr(worker, "parse_sensor_file", lambda path: [_reading("sensor_001")])
     monkeypatch.setattr(worker, "bulk_upsert_readings", lambda _url, readings: calls.append(readings) or 1)
     worker.PROCESSED_FILE_SIGNATURES.clear()
 
+    assignments = {}
+    monkeypatch.setattr(worker, "fetch_folder_station_codes", lambda: assignments.copy())
     worker.process_once()
 
     assert calls == []
-    assert (tmp_path / "error" / "reading.csv").exists()
+    assert source.exists()
+
+    assignments["/data/sensor_001"] = "station-renamed"
+    worker.process_once()
+
+    assert calls[0][0].station_code == "station-renamed"
+    assert source.exists()

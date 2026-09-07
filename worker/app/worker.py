@@ -27,6 +27,10 @@ FTP_SERVER_ID = int(os.getenv("FTP_SERVER_ID", "0"))
 PROCESSED_FILE_SIGNATURES: set[tuple[str, int, int]] = set()
 
 
+class UnassignedFolderError(ValueError):
+    """The file must wait until its FTP folder is assigned to a station."""
+
+
 def main() -> None:
     FTP_INCOMING_DIR.mkdir(parents=True, exist_ok=True)
     FTP_ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -49,8 +53,12 @@ def process_once() -> None:
             continue
         destination_dir = FTP_ARCHIVE_DIR
         try:
-            readings = parse_sensor_file(path)
             station_code = station_code_for_path(path, folder_station_codes)
+        except UnassignedFolderError:
+            logger.info("Waiting for station assignment before processing %s", path)
+            continue
+        try:
+            readings = parse_sensor_file(path)
             if station_code:
                 readings = [replace(reading, station_code=station_code) for reading in readings]
             inserted = bulk_upsert_readings(DATABASE_URL, readings)
@@ -97,7 +105,7 @@ def station_code_for_path(path: Path, folder_station_codes: dict[str, str]) -> s
         if folder_path == assigned_folder or folder_path.startswith(f"{assigned_folder}/")
     ]
     if not matches:
-        raise ValueError(f"FTP folder is not assigned to a station: {folder_path}")
+        raise UnassignedFolderError(f"FTP folder is not assigned to a station: {folder_path}")
     return max(matches, key=lambda item: len(item[0]))[1]
 
 
