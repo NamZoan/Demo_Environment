@@ -565,7 +565,7 @@ async def station_data(
     station_id: int,
     start_time: Annotated[datetime, Query()],
     end_time: Annotated[datetime, Query()],
-    resolution: str = Query("15m", pattern="^(1m|15m|1h|1d)$"),
+    resolution: str = Query("1m", pattern="^(1m|15m|1h|1d)$"),
     max_points: int = Query(MAX_INTERACTIVE_POINTS_DEFAULT),
     page: int | None = Query(None, ge=1),
     page_size: int | None = Query(None, ge=25, le=500),

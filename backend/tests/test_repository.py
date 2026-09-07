@@ -365,6 +365,7 @@ def test_fetch_station_data_returns_requested_page_and_total_pages():
                 "pm25": 41.2,
                 "samples": 1,
                 "valid_hours": None,
+                "total_points": 250,
             }
         ],
     )

@@ -163,7 +163,7 @@ export default function StationParameters({ onBack, station }) {
   ];
 
   useEffect(() => {
-    if (!submittedQuery) return undefined;
+    if (!submittedQuery || submittedQuery.stationId !== station.id) return undefined;
     let cancelled = false;
     setDataLoading(true);
 
@@ -225,7 +225,7 @@ export default function StationParameters({ onBack, station }) {
     }
     setPage(1);
     setQueryError("");
-    setSubmittedQuery({ ...timeRange, resolution });
+    setSubmittedQuery({ ...timeRange, resolution, stationId: station.id });
   }
 
   useEffect(() => {

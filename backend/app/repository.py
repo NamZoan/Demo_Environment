@@ -161,7 +161,7 @@ def resolution_source(resolution: str) -> tuple[str, str]:
     try:
         return sources[resolution]
     except KeyError as exc:
-        raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d") from exc
+        raise ValueError("Unsupported resolution. Use one of: 1m, 15m, 1h, 1d") from exc
 
 
 def station_data_source(resolution: str) -> tuple[str, str]:
@@ -242,7 +242,7 @@ def station_data_source(resolution: str) -> tuple[str, str]:
             """,
             "bucket",
         )
-    raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d")
+    raise ValueError("Unsupported resolution. Use one of: 1m, 15m, 1h, 1d")
 
 
 def estimated_candidate_points(start_time: datetime, end_time: datetime, resolution: str) -> int:
@@ -293,7 +293,7 @@ def station_downsample_source(resolution: str) -> tuple[str, str]:
         metrics = metric_expressions[resolution]
         samples_expression, valid_hours_expression = sample_expressions[resolution]
     except KeyError as exc:
-        raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d") from exc
+        raise ValueError("Unsupported resolution. Use one of: 1m, 15m, 1h, 1d") from exc
     return (
         f"""
         SELECT
@@ -335,7 +335,7 @@ def choose_effective_resolution(requested_resolution: str, start_time: datetime,
         return "1h", "Switched from 1m to 1h because the selected range is longer than 48 hours."
     if requested_resolution in RESOLUTION_DURATIONS:
         return requested_resolution, None
-    raise ValueError("Unsupported resolution. Use one of: 1m, 1h, 1d")
+    raise ValueError("Unsupported resolution. Use one of: 1m, 15m, 1h, 1d")
 
 
 def query_meta(
@@ -1160,6 +1160,8 @@ async def fetch_station_data(
     validate_interactive_query_range(start_time, end_time, max_points)
     if page is not None and page < 1:
         raise ValueError("page must be at least 1")
+    if (page is None) != (page_size is None):
+        raise ValueError("page and page_size must be provided together")
     if page_size is not None and not MIN_STATION_PAGE_SIZE <= page_size <= MAX_STATION_PAGE_SIZE:
         raise ValueError(f"page_size must be between {MIN_STATION_PAGE_SIZE} and {MAX_STATION_PAGE_SIZE}")
     station_region_id = await resolve_station_region_id(connection, station_id)
@@ -1172,14 +1174,19 @@ async def fetch_station_data(
     if page_size is not None:
         page = page or 1
         source_query, bucket_column = station_data_source(effective_resolution)
-        count_query = f"SELECT count(*)::bigint AS total_points FROM ({source_query}) station_points"
-        count_row = await connection.fetchrow(count_query, station_id, start_time, end_time)
-        total_points = int(count_row["total_points"] or 0)
         offset = (page - 1) * page_size
-        rows = await connection.fetch(f"{source_query}\nLIMIT $4 OFFSET $5", station_id, start_time, end_time, page_size, offset)
+        rows = await connection.fetch(
+            f"SELECT station_points.*, count(*) OVER() AS total_points FROM ({source_query}) station_points ORDER BY station_points.{bucket_column} LIMIT $4 OFFSET $5",
+            station_id,
+            start_time,
+            end_time,
+            page_size,
+            offset,
+        )
+        total_points = int(rows[0]["total_points"] or 0) if rows else 0
         return {
             "meta": query_meta(resolution, effective_resolution, max_points, len(rows), False, resolution_note, page, page_size, total_points),
-            "points": [{**dict(row), "time": row[bucket_column]} for row in rows],
+            "points": [{key: value for key, value in {**dict(row), "time": row[bucket_column]}.items() if key != "total_points"} for row in rows],
         }
     if downsampled:
         query, bucket_column = station_downsample_source(effective_resolution)
