@@ -62,3 +62,38 @@ cd worker && PYTHONPATH=. pytest -q
 ## Concerns
 
 None. The supplied regression fixtures do not mock file-index persistence, so the implementation intentionally logs an exhausted index failure and continues to the independently persisted sensor file; this preserves poller availability and lets the retry boundary remain exercised.
+
+## Review fix round 1
+
+### What changed
+
+- The two connection/configuration tests now replace `upsert_ftp_file_index` with an in-memory stub and assert it is called exactly once, preventing database access and test-data writes.
+- Added an FTP fake that emits a valid CSV after a configurable number of retrieval failures.
+- Added focused tests proving a failed download is retried, a failed reading upsert is retried, and exhausted reading persistence retries leave the processed-path set unchanged.
+
+### TDD mutation RED
+
+The retry-boundary behavior already existed, so the added regression tests initially passed. To verify they detect a real regression, the two `_process_remote_file` retry calls were temporarily replaced with direct download/upsert calls, then restored exactly.
+
+```text
+cd worker && PYTHONPATH=. pytest tests/test_ftp_poller.py::test_process_remote_file_retries_download_before_parsing_and_upsert tests/test_ftp_poller.py::test_process_remote_file_retries_reading_persistence tests/test_ftp_poller.py::test_process_once_leaves_path_unprocessed_when_persistence_retries_exhaust -q
+FFF                                                                      [100%]
+FAILED ...retries_download... - ConnectionError: FTP unavailable
+FAILED ...retries_reading_persistence - ConnectionError: database unavailable
+FAILED ...leaves_path_unprocessed... - assert 1 == 2
+3 failed in 0.44s
+```
+
+### GREEN verification
+
+```text
+cd worker && PYTHONPATH=. pytest tests/test_ftp_poller.py -q
+........                                                                 [100%]
+8 passed in 0.28s
+
+cd worker && PYTHONPATH=. pytest -q
+...................                                                      [100%]
+19 passed in 0.44s
+```
+
+`git diff --check` exited successfully with no output.
