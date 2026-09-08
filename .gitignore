@@ -7,3 +7,6 @@ dist/
 .worktrees/
 .superpowers/
 .DS_Store
+proxy/runtime.env
+proxy/proxy.pid
+proxy/proxy.log
