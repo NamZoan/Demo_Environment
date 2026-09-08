@@ -5,16 +5,40 @@ import hmac
 import ipaddress
 import os
 import struct
+from collections.abc import Mapping
+
+
+def parse_credentials(value: str) -> dict[str, str]:
+    credentials: dict[str, str] = {}
+    for entry in value.split(","):
+        username, separator, password = entry.partition(":")
+        if not separator or not username or not password or username in credentials:
+            raise ValueError("PROXY_USERS must contain unique username:password entries")
+        credentials[username] = password
+    return credentials
 
 
 class Socks5Server:
-    def __init__(self, username: str, password: str, host: str = "0.0.0.0", port: int = 18080):
-        if not username or not password:
+    def __init__(
+        self,
+        username: str | Mapping[str, str],
+        password: str | None = None,
+        host: str = "0.0.0.0",
+        port: int = 18080,
+    ):
+        if isinstance(username, Mapping):
+            if password is not None:
+                raise ValueError("password is not used with multiple proxy accounts")
+            credentials = dict(username)
+        else:
+            if password is None:
+                raise ValueError("proxy password is required")
+            credentials = {username: password}
+        if not credentials:
             raise ValueError("proxy username and password are required")
-        if len(username.encode()) > 255 or len(password.encode()) > 255:
+        if any(len(user.encode()) > 255 or len(secret.encode()) > 255 for user, secret in credentials.items()):
             raise ValueError("proxy credentials must fit SOCKS5 authentication fields")
-        self.username = username.encode()
-        self.password = password.encode()
+        self.credentials = {user.encode(): secret.encode() for user, secret in credentials.items()}
         self.host = host
         self.port = port
 
@@ -64,8 +88,8 @@ class Socks5Server:
         password = await reader.readexactly(password_length)
         valid = (
             auth_version == 1
-            and hmac.compare_digest(username, self.username)
-            and hmac.compare_digest(password, self.password)
+            and username in self.credentials
+            and hmac.compare_digest(password, self.credentials.get(username, b""))
         )
         writer.write(b"\x01\x00" if valid else b"\x01\xff")
         await writer.drain()
@@ -104,11 +128,11 @@ class Socks5Server:
 
 
 async def run() -> None:
-    username = os.environ["PROXY_USERNAME"]
-    password = os.environ["PROXY_PASSWORD"]
+    users = os.getenv("PROXY_USERS")
+    credentials = parse_credentials(users) if users else {os.environ["PROXY_USERNAME"]: os.environ["PROXY_PASSWORD"]}
     host = os.getenv("PROXY_HOST", "0.0.0.0")
     port = int(os.getenv("PROXY_PORT", "18080"))
-    proxy = Socks5Server(username, password, host, port)
+    proxy = Socks5Server(credentials, host=host, port=port)
     server = await proxy.start()
     print(f"SOCKS5 proxy listening on {host}:{port}", flush=True)
     async with server:

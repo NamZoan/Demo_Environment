@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from proxy.server import Socks5Server
+from proxy.server import Socks5Server, parse_credentials
 
 
 def run(coro):
@@ -30,6 +30,38 @@ def test_socks5_rejects_invalid_credentials():
         assert await reader.readexactly(2) == b"\x05\x02"
         writer.write(b"\x01\x04user\x05wrong")
         assert await reader.readexactly(2) == b"\x01\xff"
+
+        writer.close()
+        await writer.wait_closed()
+        server.close()
+        await server.wait_closed()
+
+    run(scenario())
+
+
+def test_parse_credentials_builds_distinct_accounts():
+    assert parse_credentials("boxphone:first,boxphone02:second") == {
+        "boxphone": "first",
+        "boxphone02": "second",
+    }
+
+
+def test_parse_credentials_rejects_malformed_entries():
+    with pytest.raises(ValueError):
+        parse_credentials("boxphone:first,malformed")
+
+
+def test_socks5_accepts_each_configured_account():
+    async def scenario():
+        proxy = Socks5Server({"boxphone": "first", "boxphone02": "second"}, host="127.0.0.1", port=0)
+        server = await proxy.start()
+        port = server.sockets[0].getsockname()[1]
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+
+        writer.write(b"\x05\x01\x02")
+        assert await reader.readexactly(2) == b"\x05\x02"
+        writer.write(b"\x01\x0aboxphone02\x06second")
+        assert await reader.readexactly(2) == b"\x01\x00"
 
         writer.close()
         await writer.wait_closed()

@@ -6,8 +6,7 @@ website services and supports TCP `CONNECT` only.
 Runtime configuration is kept in `runtime.env` (ignored by Git):
 
 ```text
-PROXY_USERNAME=...
-PROXY_PASSWORD=...
+PROXY_USERS=user1:password1,user2:password2
 PROXY_HOST=0.0.0.0
 PROXY_PORT=18080
 ```
@@ -25,8 +24,8 @@ Configure Boxphone with:
 Type: SOCKS5
 Host: 161.248.81.149
 Port: 18080
-Username: value of PROXY_USERNAME
-Password: value of PROXY_PASSWORD
+Username: one configured username
+Password: matching value from PROXY_USERS
 ```
 
 Do not remove authentication or expose the credentials in a public channel.
